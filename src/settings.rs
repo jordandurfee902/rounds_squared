@@ -227,7 +227,7 @@ impl Default for AppSettings {
     }
 }
 
-#[derive(Resource, Default, Debug, Clone)]
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScoreTracker {
     pub p1_wins: u32,
     pub p2_wins: u32,

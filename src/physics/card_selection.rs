@@ -7,11 +7,11 @@ pub struct CardSelectionPlugin;
 
 impl Plugin for CardSelectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, check_player_death.run_if(in_state(GameState::Gameplay).and(crate::physics::is_not_paused)))
+        app.add_systems(Update, check_player_death.run_if(in_state(GameState::Gameplay).and(crate::physics::is_not_paused).and(resource_equals(crate::net::IsNetworked(false)))))
            .add_systems(OnEnter(GameState::CardSelection), setup_card_selection)
            .add_systems(OnExit(GameState::CardSelection), cleanup_card_selection)
            .add_systems(Update, (
-               card_selection_input,
+               card_selection_input.run_if(resource_equals(crate::net::IsNetworked(false))),
                draw_card_gizmos,
            ).run_if(in_state(GameState::CardSelection)));
     }
@@ -86,7 +86,7 @@ pub const CARDS: [CardDef; 5] = [
     },
 ];
 
-fn check_player_death(
+pub fn check_player_death(
     mut commands: Commands,
     players_query: Query<(Entity, &Player, &Health)>,
     proj_query: Query<Entity, With<Projectile>>,
@@ -94,6 +94,7 @@ fn check_player_death(
     mut score: ResMut<crate::settings::ScoreTracker>,
     mut active_map: ResMut<crate::maps::ActiveMap>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut rollback_rng: ResMut<crate::net::RollbackRng>,
 ) {
     let mut dead_player = None;
     for (_, player, health) in players_query.iter() {
@@ -114,8 +115,24 @@ fn check_player_death(
             }
         }
 
-        // Select a new pseudo-random map for the next round!
-        *active_map = crate::maps::ActiveMap::select_random();
+        // Deterministically select a new map using the synchronized RollbackRng seed!
+        let rand_val = (rollback_rng.next_f32() * 13.0) as u32;
+        let selected_map = match rand_val {
+            0 => crate::maps::ActiveMap::DefaultMap,
+            1 => crate::maps::ActiveMap::PillarsMap,
+            2 => crate::maps::ActiveMap::StadiumMap,
+            3 => crate::maps::ActiveMap::ChasmBridge,
+            4 => crate::maps::ActiveMap::Gridlock,
+            5 => crate::maps::ActiveMap::Hourglass,
+            6 => crate::maps::ActiveMap::IceTemple,
+            7 => crate::maps::ActiveMap::IndustrialFoundry,
+            8 => crate::maps::ActiveMap::VerticalHelix,
+            9 => crate::maps::ActiveMap::TectonicFissure,
+            10 => crate::maps::ActiveMap::ZenGarden,
+            11 => crate::maps::ActiveMap::SpaceStation,
+            _ => crate::maps::ActiveMap::AncientColiseum,
+        };
+        *active_map = selected_map;
 
         // Despawn both players from map
         for (entity, _, _) in players_query.iter() {
@@ -317,7 +334,8 @@ fn draw_rotated_rect(
 
 fn card_selection_input(
     keys: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    lobby_slots: Res<crate::settings::LobbySlots>,
     time: Res<Time>,
     mut gamepad_cooldown: Local<f32>,
     mut state: ResMut<CardSelectionState>,
@@ -329,32 +347,59 @@ fn card_selection_input(
     }
 
     let mut step = 0i32;
+    let mut confirm = false;
 
-    if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) {
-        step = -1;
-    }
-    if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) {
-        step = 1;
-    }
+    let selecting_device = match state.selecting_player {
+        Player::P1 => &lobby_slots.p1,
+        Player::P2 => &lobby_slots.p2,
+    };
 
-    // Gamepad support for card selection
-    let gamepad = gamepads.iter().next();
-    if let Some(gp) = gamepad {
-        let left_stick = gp.left_stick();
-        if *gamepad_cooldown <= 0.0 {
-            if left_stick.x < -0.5 {
+    match selecting_device {
+        Some(crate::settings::InputDevice::KeyboardMouse) => {
+            if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) {
                 step = -1;
-                *gamepad_cooldown = 0.25; // 250ms scroll cooldown
-            } else if left_stick.x > 0.5 {
+            }
+            if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) {
                 step = 1;
-                *gamepad_cooldown = 0.25; // 250ms scroll cooldown
+            }
+            if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyQ) {
+                confirm = true;
             }
         }
-        if gp.just_pressed(GamepadButton::DPadLeft) {
-            step = -1;
+        Some(crate::settings::InputDevice::Gamepad(gp_entity)) => {
+            if let Ok((_, gp)) = gamepads.get(*gp_entity) {
+                let left_stick = gp.left_stick();
+                if *gamepad_cooldown <= 0.0 {
+                    if left_stick.x < -0.5 {
+                        step = -1;
+                        *gamepad_cooldown = 0.25;
+                    } else if left_stick.x > 0.5 {
+                        step = 1;
+                        *gamepad_cooldown = 0.25;
+                    }
+                }
+                if gp.just_pressed(GamepadButton::DPadLeft) {
+                    step = -1;
+                }
+                if gp.just_pressed(GamepadButton::DPadRight) {
+                    step = 1;
+                }
+                if gp.just_pressed(GamepadButton::South) {
+                    confirm = true;
+                }
+            }
         }
-        if gp.just_pressed(GamepadButton::DPadRight) {
-            step = 1;
+        None => {
+            // Fallback (Keyboard/Mouse)
+            if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) {
+                step = -1;
+            }
+            if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) {
+                step = 1;
+            }
+            if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyQ) {
+                confirm = true;
+            }
         }
     }
 
@@ -363,14 +408,6 @@ fn card_selection_input(
             state.selected_idx = if state.selected_idx == 0 { 4 } else { state.selected_idx - 1 };
         } else {
             state.selected_idx = (state.selected_idx + 1) % 5;
-        }
-    }
-
-    // Confirm selection
-    let mut confirm = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyQ);
-    if let Some(gp) = gamepad {
-        if gp.just_pressed(GamepadButton::South) {
-            confirm = true;
         }
     }
 

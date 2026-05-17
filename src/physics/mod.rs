@@ -59,11 +59,16 @@ impl Plugin for PhysicsPlugin {
             weapon::weapon_update_system,
             weapon::weapon_fire_system,
             weapon::projectile_physics_system,
+            crate::physics::card_selection::check_player_death,
         ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused)));
 
         app.add_systems(bevy_ggrs::GgrsSchedule, (
             crate::net::lobby_sync_network_system,
-        ).run_if(in_state(GameState::Lobby)));
+        ).run_if(in_state(GameState::Lobby)).ambiguous_with_all());
+
+        app.add_systems(bevy_ggrs::GgrsSchedule, (
+            crate::net::card_selection_sync_network_system,
+        ).run_if(in_state(GameState::CardSelection)).ambiguous_with_all());
 
         // Register GGRS input capture system
         app.add_systems(bevy_ggrs::ReadInputs, crate::net::ggrs_input_system);

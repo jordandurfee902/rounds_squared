@@ -31,6 +31,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.05)))
         .insert_resource(net::IsNetworked(false))
         .insert_resource(net::LocalPlayerIndex(0))
+        .insert_resource(net::RollbackRng::new(12345))
         .add_systems(Startup, (setup_camera, maximize_window))
         .add_systems(OnEnter(GameState::Matchmaking), net::start_matchmaking)
         .add_systems(Update, net::lobby_system.run_if(in_state(GameState::Matchmaking)))
@@ -49,6 +50,10 @@ fn main() {
         .rollback_component_with_copy::<BlockComponent>()
         .rollback_component_with_clone::<crate::physics::weapon::Projectile>()
         .rollback_resource_with_copy::<net::RollbackRng>()
+        .rollback_resource_with_copy::<crate::settings::ScoreTracker>()
+        .rollback_resource_with_copy::<crate::maps::ActiveMap>()
+        .rollback_resource_with_clone::<crate::physics::card_selection::CardSelectionState>()
+        .rollback_resource_with_clone::<crate::settings::PersistentPlayerStats>()
         .run();
 }
 

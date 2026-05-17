@@ -139,6 +139,9 @@ pub fn ggrs_input_system(
     mouse: Res<ButtonInput<MouseButton>>,
     gamepads: Query<&Gamepad>,
     aim_query: Query<(&crate::player::Player, &crate::physics::PlayerAim)>,
+    state: Res<State<crate::settings::GameState>>,
+    time: Res<Time>,
+    mut stick_cooldowns: Local<[f32; 2]>,
 ) {
     let mut local_inputs = bevy::platform::collections::HashMap::default();
 
@@ -157,61 +160,127 @@ pub fn ggrs_input_system(
             _ => &lobby_slots.p1,
         };
 
-        if let Some(device) = slot {
-            match device {
-                crate::settings::InputDevice::KeyboardMouse => {
-                    let left_key = crate::settings::parse_key_code(&kb_controls.move_left).unwrap_or(KeyCode::KeyA);
-                    let right_key = crate::settings::parse_key_code(&kb_controls.move_right).unwrap_or(KeyCode::KeyD);
-                    let jump_key = crate::settings::parse_key_code(&kb_controls.jump).unwrap_or(KeyCode::KeyW);
-                    let fast_fall_key = crate::settings::parse_key_code(&kb_controls.fast_fall).unwrap_or(KeyCode::KeyS);
-                    let reload_key = crate::settings::parse_key_code(&kb_controls.reload).unwrap_or(KeyCode::KeyR);
-                    let block_key = crate::settings::parse_key_code(&kb_controls.block).unwrap_or(KeyCode::KeyX);
+        // Decrement joystick navigation cooldown for this handle
+        let h_idx = (handle as usize).min(1);
+        stick_cooldowns[h_idx] = (stick_cooldowns[h_idx] - time.delta_secs()).max(0.0);
 
-                    if keys.pressed(left_key) { move_dir -= 1.0; }
-                    if keys.pressed(right_key) { move_dir += 1.0; }
-                    if keys.just_pressed(jump_key) { jump = true; }
-                    if keys.pressed(fast_fall_key) { fast_fall = true; }
-                    if keys.just_pressed(reload_key) { reload = true; }
-                    
-                    if let Some(mb) = crate::settings::parse_mouse_button(&kb_controls.block) {
-                        if mouse.just_pressed(mb) { block = true; }
-                    } else if keys.just_pressed(block_key) {
-                        block = true;
+        let mut left_nav = false;
+        let mut right_nav = false;
+        let mut confirm_nav = false;
+
+        let is_card_selection = *state.get() == crate::settings::GameState::CardSelection;
+
+        if is_card_selection {
+            if let Some(device) = slot {
+                match device {
+                    crate::settings::InputDevice::KeyboardMouse => {
+                        if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft) {
+                            left_nav = true;
+                        }
+                        if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) {
+                            right_nav = true;
+                        }
+                        if keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter) {
+                            confirm_nav = true;
+                        }
                     }
+                    crate::settings::InputDevice::Gamepad(gp_entity) => {
+                        if let Ok(gp) = gamepads.get(*gp_entity) {
+                            let left_stick = gp.left_stick();
 
-                    if let Some(mb) = crate::settings::parse_mouse_button(&kb_controls.shoot) {
-                        if mouse.pressed(mb) { fire = true; }
-                    } else if let Some(kc) = crate::settings::parse_key_code(&kb_controls.shoot) {
-                        if keys.pressed(kc) { fire = true; }
-                    } else {
-                        if mouse.pressed(MouseButton::Left) { fire = true; }
+                            // Reset cooldown instantly if the stick is returned to neutral
+                            if left_stick.x.abs() < 0.2 {
+                                stick_cooldowns[h_idx] = 0.0;
+                            }
+
+                            if gp.just_pressed(GamepadButton::DPadLeft) {
+                                left_nav = true;
+                            } else if left_stick.x < -0.5 && stick_cooldowns[h_idx] <= 0.0 {
+                                left_nav = true;
+                                stick_cooldowns[h_idx] = 0.25;
+                            }
+
+                            if gp.just_pressed(GamepadButton::DPadRight) {
+                                right_nav = true;
+                            } else if left_stick.x > 0.5 && stick_cooldowns[h_idx] <= 0.0 {
+                                right_nav = true;
+                                stick_cooldowns[h_idx] = 0.25;
+                            }
+
+                            if gp.just_pressed(GamepadButton::South) {
+                                confirm_nav = true;
+                            }
+                        }
                     }
                 }
-                crate::settings::InputDevice::Gamepad(gp_entity) => {
-                    if let Ok(gp) = gamepads.get(*gp_entity) {
-                        let stick = gp.left_stick();
-                        move_dir = stick.x;
-                        let jump_btn = crate::settings::parse_gamepad_button(&ctrl_controls.jump).unwrap_or(GamepadButton::South);
-                        if gp.just_pressed(jump_btn) { jump = true; }
-                        if stick.y < -0.5 { fast_fall = true; }
-                        let reload_btn = crate::settings::parse_gamepad_button(&ctrl_controls.reload).unwrap_or(GamepadButton::West);
-                        if gp.just_pressed(reload_btn) { reload = true; }
-                        let shoot_btn = crate::settings::parse_gamepad_button(&ctrl_controls.shoot).unwrap_or(GamepadButton::RightTrigger2);
-                        if gp.pressed(shoot_btn) { fire = true; }
-                        let block_btn = crate::settings::parse_gamepad_button(&ctrl_controls.block).unwrap_or(GamepadButton::LeftTrigger2);
-                        if gp.just_pressed(block_btn) { block = true; }
-                    }
+            } else {
+                if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft) {
+                    left_nav = true;
+                }
+                if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) {
+                    right_nav = true;
+                }
+                if keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter) {
+                    confirm_nav = true;
                 }
             }
         } else {
-            // Fallback reading P1 controls
-            if keys.pressed(KeyCode::KeyA) { move_dir -= 1.0; }
-            if keys.pressed(KeyCode::KeyD) { move_dir += 1.0; }
-            if keys.just_pressed(KeyCode::KeyW) { jump = true; }
-            if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
-            if keys.just_pressed(KeyCode::KeyR) { reload = true; }
-            if mouse.just_pressed(MouseButton::Right) { block = true; }
-            if mouse.pressed(MouseButton::Left) { fire = true; }
+            if let Some(device) = slot {
+                match device {
+                    crate::settings::InputDevice::KeyboardMouse => {
+                        let left_key = crate::settings::parse_key_code(&kb_controls.move_left).unwrap_or(KeyCode::KeyA);
+                        let right_key = crate::settings::parse_key_code(&kb_controls.move_right).unwrap_or(KeyCode::KeyD);
+                        let jump_key = crate::settings::parse_key_code(&kb_controls.jump).unwrap_or(KeyCode::KeyW);
+                        let fast_fall_key = crate::settings::parse_key_code(&kb_controls.fast_fall).unwrap_or(KeyCode::KeyS);
+                        let reload_key = crate::settings::parse_key_code(&kb_controls.reload).unwrap_or(KeyCode::KeyR);
+                        let block_key = crate::settings::parse_key_code(&kb_controls.block).unwrap_or(KeyCode::KeyX);
+
+                        if keys.pressed(left_key) { move_dir -= 1.0; }
+                        if keys.pressed(right_key) { move_dir += 1.0; }
+                        if keys.just_pressed(jump_key) { jump = true; }
+                        if keys.pressed(fast_fall_key) { fast_fall = true; }
+                        if keys.just_pressed(reload_key) { reload = true; }
+                        
+                        if let Some(mb) = crate::settings::parse_mouse_button(&kb_controls.block) {
+                            if mouse.just_pressed(mb) { block = true; }
+                        } else if keys.just_pressed(block_key) {
+                            block = true;
+                        }
+
+                        if let Some(mb) = crate::settings::parse_mouse_button(&kb_controls.shoot) {
+                            if mouse.pressed(mb) { fire = true; }
+                        } else if let Some(kc) = crate::settings::parse_key_code(&kb_controls.shoot) {
+                            if keys.pressed(kc) { fire = true; }
+                        } else {
+                            if mouse.pressed(MouseButton::Left) { fire = true; }
+                        }
+                    }
+                    crate::settings::InputDevice::Gamepad(gp_entity) => {
+                        if let Ok(gp) = gamepads.get(*gp_entity) {
+                            let stick = gp.left_stick();
+                            move_dir = stick.x;
+                            let jump_btn = crate::settings::parse_gamepad_button(&ctrl_controls.jump).unwrap_or(GamepadButton::South);
+                            if gp.just_pressed(jump_btn) { jump = true; }
+                            if stick.y < -0.5 { fast_fall = true; }
+                            let reload_btn = crate::settings::parse_gamepad_button(&ctrl_controls.reload).unwrap_or(GamepadButton::West);
+                            if gp.just_pressed(reload_btn) { reload = true; }
+                            let shoot_btn = crate::settings::parse_gamepad_button(&ctrl_controls.shoot).unwrap_or(GamepadButton::RightTrigger2);
+                            if gp.pressed(shoot_btn) { fire = true; }
+                            let block_btn = crate::settings::parse_gamepad_button(&ctrl_controls.block).unwrap_or(GamepadButton::LeftTrigger2);
+                            if gp.just_pressed(block_btn) { block = true; }
+                        }
+                    }
+                }
+            } else {
+                // Fallback reading P1 controls
+                if keys.pressed(KeyCode::KeyA) { move_dir -= 1.0; }
+                if keys.pressed(KeyCode::KeyD) { move_dir += 1.0; }
+                if keys.just_pressed(KeyCode::KeyW) { jump = true; }
+                if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
+                if keys.just_pressed(KeyCode::KeyR) { reload = true; }
+                if mouse.just_pressed(MouseButton::Right) { block = true; }
+                if mouse.pressed(MouseButton::Left) { fire = true; }
+            }
         }
 
         // Get aim direction for the player
@@ -227,16 +296,22 @@ pub fn ggrs_input_system(
         }
 
         let mut buttons = 0u8;
-        if jump { buttons |= 1 << 0; }
-        if fast_fall { buttons |= 1 << 1; }
-        if fire { buttons |= 1 << 2; }
-        if reload { buttons |= 1 << 3; }
-        if block { buttons |= 1 << 4; }
+        if is_card_selection {
+            if left_nav { buttons |= 1 << 5; }
+            if right_nav { buttons |= 1 << 6; }
+            if confirm_nav { buttons |= 1 << 7; }
+        } else {
+            if jump { buttons |= 1 << 0; }
+            if fast_fall { buttons |= 1 << 1; }
+            if fire { buttons |= 1 << 2; }
+            if reload { buttons |= 1 << 3; }
+            if block { buttons |= 1 << 4; }
 
-        if slot.is_some() {
-            buttons |= 1 << 5; // Joined/Ready
-            if let Some(crate::settings::InputDevice::Gamepad(_)) = slot {
-                buttons |= 1 << 6; // Gamepad
+            if slot.is_some() {
+                buttons |= 1 << 5; // Joined/Ready
+                if let Some(crate::settings::InputDevice::Gamepad(_)) = slot {
+                    buttons |= 1 << 6; // Gamepad
+                }
             }
         }
 
@@ -264,7 +339,11 @@ pub fn unpack_network_inputs(
             crate::player::Player::P2 => 1,
         };
 
-        let (ggrs_input, _) = inputs[handle];
+        let ggrs_input = if let Some((inp, _)) = inputs.get(handle) {
+            inp
+        } else {
+            continue;
+        };
 
         input.move_dir = ggrs_input.move_dir_packed as f32 / 100.0;
         input.jump = (ggrs_input.buttons & (1 << 0)) != 0;
@@ -292,9 +371,20 @@ pub fn lobby_sync_network_system(
 ) {
     let local_idx = local_idx_opt.map(|idx| idx.0).unwrap_or(0);
 
+    let p1_input = if let Some((inp, _)) = inputs.get(0) {
+        inp
+    } else {
+        return;
+    };
+
+    let p2_input = if let Some((inp, _)) = inputs.get(1) {
+        inp
+    } else {
+        return;
+    };
+
     // Synchronize P1 (handle 0)
     if local_idx != 0 {
-        let (p1_input, _) = inputs[0];
         let joined = (p1_input.buttons & (1 << 5)) != 0;
         if joined {
             let is_gamepad = (p1_input.buttons & (1 << 6)) != 0;
@@ -311,7 +401,6 @@ pub fn lobby_sync_network_system(
 
     // Synchronize P2 (handle 1)
     if local_idx != 1 {
-        let (p2_input, _) = inputs[1];
         let joined = (p2_input.buttons & (1 << 5)) != 0;
         if joined {
             let is_gamepad = (p2_input.buttons & (1 << 6)) != 0;
@@ -327,13 +416,84 @@ pub fn lobby_sync_network_system(
     }
 
     // Transition to Gameplay if BOTH players are ready!
-    let (p1_input, _) = inputs[0];
-    let (p2_input, _) = inputs[1];
     let p1_ready = (p1_input.buttons & (1 << 5)) != 0;
     let p2_ready = (p2_input.buttons & (1 << 5)) != 0;
 
     if p1_ready && p2_ready {
         info!("ONLINE LOBBY: Both players joined! Starting match...");
         state.set(crate::settings::GameState::Gameplay);
+    }
+}
+
+// --- GGRS CARD SELECTION SYNC SYSTEM ---
+pub fn card_selection_sync_network_system(
+    inputs: Res<bevy_ggrs::PlayerInputs<GgrsConfig>>,
+    mut card_state: ResMut<crate::physics::card_selection::CardSelectionState>,
+    mut persistent_stats: ResMut<crate::settings::PersistentPlayerStats>,
+    mut next_state: ResMut<NextState<crate::settings::GameState>>,
+) {
+    let selecting_player = card_state.selecting_player;
+    let selecting_handle = match selecting_player {
+        crate::player::Player::P1 => 0,
+        crate::player::Player::P2 => 1,
+    };
+
+    let input = if let Some((inp, _)) = inputs.get(selecting_handle) {
+        inp
+    } else {
+        return;
+    };
+
+    let left_nav = (input.buttons & (1 << 5)) != 0;
+    let right_nav = (input.buttons & (1 << 6)) != 0;
+    let confirm = (input.buttons & (1 << 7)) != 0;
+
+    if left_nav {
+        card_state.selected_idx = if card_state.selected_idx == 0 { 4 } else { card_state.selected_idx - 1 };
+    } else if right_nav {
+        card_state.selected_idx = (card_state.selected_idx + 1) % 5;
+    }
+
+    if confirm {
+        let p_stats = match selecting_player {
+            crate::player::Player::P1 => &mut persistent_stats.p1,
+            crate::player::Player::P2 => &mut persistent_stats.p2,
+        };
+
+        p_stats.cards.push(card_state.selected_idx);
+
+        match card_state.selected_idx {
+            0 => { // Fast & Light
+                p_stats.movement_speed *= 1.30;
+                p_stats.health_max *= 0.80;
+            }
+            1 => { // Tanky Giant
+                p_stats.health_max *= 1.40;
+                p_stats.player_scale *= 1.30;
+                p_stats.jump_force *= 0.85;
+            }
+            2 => { // Hyper-Shot
+                p_stats.bullet_speed *= 1.35;
+                p_stats.bullet_damage *= 1.20;
+                p_stats.max_ammo = p_stats.max_ammo.saturating_sub(1).max(1);
+            }
+            3 => { // Toxic Spray
+                if !p_stats.special_effects.contains(&"PoisonCloud".to_string()) {
+                    p_stats.special_effects.push("PoisonCloud".to_string());
+                }
+                p_stats.bullet_growth += 0.15;
+                p_stats.max_ammo += 2;
+            }
+            4 => { // Heavy Artillery
+                p_stats.bullet_damage *= 1.80;
+                p_stats.bullet_size_mult *= 1.30;
+                p_stats.bullet_gravity += 200.0;
+                p_stats.reload_time += 1.0;
+            }
+            _ => {}
+        }
+
+        // Return to gameplay round deterministically on both clients!
+        next_state.set(crate::settings::GameState::Gameplay);
     }
 }

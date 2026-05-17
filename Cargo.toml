@@ -10,3 +10,10 @@ serde_json = "1.0"
 bevy_ggrs = "0.20.0"
 matchbox_socket = { version = "0.14", features = ["ggrs"] }
 bytemuck = { version = "1.18", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
