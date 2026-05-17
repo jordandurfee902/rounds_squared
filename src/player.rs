@@ -1,15 +1,16 @@
 use bevy::prelude::*;
 use crate::physics::*;
 use crate::physics::weapon::Weapon;
-use crate::settings::{PhysicsSettings, PersistentPlayerStats, GameState};
+use crate::settings::{PersistentPlayerStats, GameState};
 
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Gameplay), spawn_players)
+        app.add_systems(OnEnter(GameState::Gameplay), spawn_players.after(crate::map::spawn_platforms))
            .add_systems(Update, (
                player_input.before(crate::physics::forces::apply_gravity_and_movement),
+               player_block_system,
                draw_health_bars,
            ).run_if(in_state(GameState::Gameplay)));
     }
@@ -33,6 +34,18 @@ pub struct PlayerStatsComponent {
     pub jump_force: f32,
     pub player_scale: f32,
     pub health_max: f32,
+    pub block_duration: f32,
+    pub block_cooldown: f32,
+    pub block_border_boost: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct BlockComponent {
+    pub active_timer: f32,
+    pub cooldown_timer: f32,
+    pub block_duration: f32,
+    pub block_cooldown: f32,
+    pub control_lockout_timer: f32,
 }
 
 pub fn spawn_players(
@@ -40,6 +53,7 @@ pub fn spawn_players(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     persistent_stats: Res<PersistentPlayerStats>,
+    active_map: Res<crate::maps::ActiveMap>,
 ) {
     let p1_stats = &persistent_stats.p1;
     let p2_stats = &persistent_stats.p2;
@@ -47,11 +61,56 @@ pub fn spawn_players(
     let p1_scale = p1_stats.player_scale;
     let p2_scale = p2_stats.player_scale;
 
+    let (p1_spawn, p2_spawn) = match *active_map {
+        crate::maps::ActiveMap::DefaultMap => {
+            // Default map: Spawn above left/right outer ledge wings
+            (Vec3::new(-1350.0, 100.0, 10.0), Vec3::new(1350.0, 100.0, 10.0))
+        }
+        crate::maps::ActiveMap::PillarsMap => {
+            // Pillars map: Spawn above left/right floating platforms
+            (Vec3::new(-650.0, 150.0, 10.0), Vec3::new(650.0, 150.0, 10.0))
+        }
+        crate::maps::ActiveMap::StadiumMap => {
+            // Stadium map: Spawn on left/right sides of the massive central floor
+            (Vec3::new(-350.0, -100.0, 10.0), Vec3::new(350.0, -100.0, 10.0))
+        }
+        crate::maps::ActiveMap::ChasmBridge => {
+            (Vec3::new(-1300.0, 300.0, 10.0), Vec3::new(1300.0, 300.0, 10.0))
+        }
+        crate::maps::ActiveMap::Gridlock => {
+            (Vec3::new(-800.0, 200.0, 10.0), Vec3::new(800.0, 200.0, 10.0))
+        }
+        crate::maps::ActiveMap::Hourglass => {
+            (Vec3::new(-1100.0, -100.0, 10.0), Vec3::new(1100.0, -100.0, 10.0))
+        }
+        crate::maps::ActiveMap::IceTemple => {
+            (Vec3::new(-1000.0, 250.0, 10.0), Vec3::new(1000.0, 250.0, 10.0))
+        }
+        crate::maps::ActiveMap::IndustrialFoundry => {
+            (Vec3::new(-1200.0, 200.0, 10.0), Vec3::new(1200.0, 200.0, 10.0))
+        }
+        crate::maps::ActiveMap::VerticalHelix => {
+            (Vec3::new(-700.0, -300.0, 10.0), Vec3::new(700.0, -300.0, 10.0))
+        }
+        crate::maps::ActiveMap::TectonicFissure => {
+            (Vec3::new(-950.0, -350.0, 10.0), Vec3::new(950.0, -350.0, 10.0))
+        }
+        crate::maps::ActiveMap::ZenGarden => {
+            (Vec3::new(-1100.0, -100.0, 10.0), Vec3::new(1100.0, -100.0, 10.0))
+        }
+        crate::maps::ActiveMap::SpaceStation => {
+            (Vec3::new(-1250.0, 100.0, 10.0), Vec3::new(1250.0, 100.0, 10.0))
+        }
+        crate::maps::ActiveMap::AncientColiseum => {
+            (Vec3::new(-800.0, 350.0, 10.0), Vec3::new(800.0, 350.0, 10.0))
+        }
+    };
+
     // Player 1 (Blue) - Base mass = 1.0 (Normal)
     commands.spawn((
         Player::P1,
         Collider::Circle { radius: 40.0 * p1_scale },
-        Transform::from_xyz(-1350.0, 100.0, 10.0),
+        Transform::from_translation(p1_spawn),
         GlobalTransform::default(),
         Visibility::default(),
         InheritedVisibility::default(),
@@ -59,6 +118,7 @@ pub fn spawn_players(
         Acceleration(Vec2::ZERO),
         Grounded(true),
         WallContact::default(),
+        JumpAllowance { value: 1 },
     )).insert((
         ControllerInput::default(),
         Mass(1.0),
@@ -70,6 +130,16 @@ pub fn spawn_players(
             jump_force: p1_stats.jump_force,
             player_scale: p1_stats.player_scale,
             health_max: p1_stats.health_max,
+            block_duration: p1_stats.block_duration,
+            block_cooldown: p1_stats.block_cooldown,
+            block_border_boost: p1_stats.block_border_boost,
+        },
+        BlockComponent {
+            active_timer: 0.0,
+            cooldown_timer: 0.0,
+            block_duration: p1_stats.block_duration,
+            block_cooldown: p1_stats.block_cooldown,
+            control_lockout_timer: 0.0,
         },
         Weapon {
             max_ammo: p1_stats.max_ammo,
@@ -93,7 +163,7 @@ pub fn spawn_players(
     commands.spawn((
         Player::P2,
         Collider::Circle { radius: 40.0 * p2_scale },
-        Transform::from_xyz(1350.0, 100.0, 10.0),
+        Transform::from_translation(p2_spawn),
         GlobalTransform::default(),
         Visibility::default(),
         InheritedVisibility::default(),
@@ -101,6 +171,7 @@ pub fn spawn_players(
         Acceleration(Vec2::ZERO),
         Grounded(true),
         WallContact::default(),
+        JumpAllowance { value: 1 },
     )).insert((
         ControllerInput::default(),
         Mass(1.0),
@@ -112,6 +183,16 @@ pub fn spawn_players(
             jump_force: p2_stats.jump_force,
             player_scale: p2_stats.player_scale,
             health_max: p2_stats.health_max,
+            block_duration: p2_stats.block_duration,
+            block_cooldown: p2_stats.block_cooldown,
+            block_border_boost: p2_stats.block_border_boost,
+        },
+        BlockComponent {
+            active_timer: 0.0,
+            cooldown_timer: 0.0,
+            block_duration: p2_stats.block_duration,
+            block_cooldown: p2_stats.block_cooldown,
+            control_lockout_timer: 0.0,
         },
         Weapon {
             max_ammo: p2_stats.max_ammo,
@@ -135,7 +216,10 @@ pub fn spawn_players(
 fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&Player, &mut ControllerInput)>,
+    gamepads: Query<&Gamepad>,
 ) {
+    let gamepad = gamepads.iter().next();
+
     for (player, mut input) in query.iter_mut() {
         let mut move_dir = 0.0;
         let mut jump = false;
@@ -149,10 +233,21 @@ fn player_input(
                 if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
             }
             Player::P2 => {
-                if keys.pressed(KeyCode::ArrowLeft) { move_dir -= 1.0; }
-                if keys.pressed(KeyCode::ArrowRight) { move_dir += 1.0; }
-                if keys.just_pressed(KeyCode::ArrowUp) { jump = true; }
-                if keys.pressed(KeyCode::ArrowDown) { fast_fall = true; }
+                if let Some(gp) = gamepad {
+                    let stick = gp.left_stick();
+                    move_dir = stick.x;
+                    if gp.just_pressed(GamepadButton::South) {
+                        jump = true;
+                    }
+                    if stick.y < -0.5 {
+                        fast_fall = true;
+                    }
+                } else {
+                    if keys.pressed(KeyCode::ArrowLeft) { move_dir -= 1.0; }
+                    if keys.pressed(KeyCode::ArrowRight) { move_dir += 1.0; }
+                    if keys.just_pressed(KeyCode::ArrowUp) { jump = true; }
+                    if keys.pressed(KeyCode::ArrowDown) { fast_fall = true; }
+                }
             }
         }
 
@@ -190,11 +285,10 @@ fn draw_filled_rect(
 
 fn draw_health_bars(
     mut gizmos: Gizmos,
-    settings: Res<PhysicsSettings>,
-    query: Query<(&Transform, &Health, &Player)>,
+    query: Query<(&Transform, &Health, &Player, &PlayerStatsComponent)>,
 ) {
-    let scale = settings.player_scale;
-    for (transform, health, player) in query.iter() {
+    for (transform, health, player, stats) in query.iter() {
+        let scale = stats.player_scale;
         let player_pos = transform.translation.xy();
         // Position the health bar about 90 pixels above the parent physical center (65px above visual floating body)
         let bar_center = player_pos + Vec2::new(0.0, 90.0 * scale);
@@ -228,6 +322,45 @@ fn draw_health_bars(
                 Vec2::new(fg_width, bar_height - 2.0),
                 color,
             );
+        }
+    }
+}
+
+pub fn player_block_system(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    gamepads: Query<&Gamepad>,
+    mut query: Query<(&Player, &mut BlockComponent)>,
+) {
+    let dt = time.delta_secs().min(0.05);
+    let gamepad = gamepads.iter().next();
+
+    for (player, mut block) in query.iter_mut() {
+        if block.active_timer > 0.0 {
+            block.active_timer = (block.active_timer - dt).max(0.0);
+        }
+        if block.cooldown_timer > 0.0 {
+            block.cooldown_timer = (block.cooldown_timer - dt).max(0.0);
+        }
+        if block.control_lockout_timer > 0.0 {
+            block.control_lockout_timer = (block.control_lockout_timer - dt).max(0.0);
+        }
+
+        let block_pressed = match player {
+            Player::P1 => mouse.just_pressed(MouseButton::Right),
+            Player::P2 => {
+                if let Some(gp) = gamepad {
+                    gp.just_pressed(GamepadButton::LeftTrigger)
+                } else {
+                    keys.just_pressed(KeyCode::KeyU)
+                }
+            }
+        };
+
+        if block_pressed && block.cooldown_timer <= 0.0 {
+            block.active_timer = block.block_duration;
+            block.cooldown_timer = block.block_cooldown;
         }
     }
 }

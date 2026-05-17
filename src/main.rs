@@ -3,6 +3,7 @@ mod player;
 mod graphics;
 mod settings;
 mod map;
+pub mod maps;
 
 use bevy::prelude::*;
 use bevy::camera::*;

@@ -47,3 +47,8 @@ pub struct ControllerInput {
     pub jump: bool,
     pub fast_fall: bool,
 }
+
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
+pub struct JumpAllowance {
+    pub value: u32,
+}

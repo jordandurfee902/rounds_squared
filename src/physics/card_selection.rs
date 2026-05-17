@@ -90,6 +90,9 @@ fn check_player_death(
     mut commands: Commands,
     players_query: Query<(Entity, &Player, &Health)>,
     proj_query: Query<Entity, With<Projectile>>,
+    particle_query: Query<Entity, With<crate::physics::particles::Particle>>,
+    mut score: ResMut<crate::settings::ScoreTracker>,
+    mut active_map: ResMut<crate::maps::ActiveMap>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let mut dead_player = None;
@@ -101,6 +104,19 @@ fn check_player_death(
     }
 
     if let Some(player_who_died) = dead_player {
+        // Increment win count for the other player
+        match player_who_died {
+            Player::P1 => {
+                score.p2_wins += 1;
+            }
+            Player::P2 => {
+                score.p1_wins += 1;
+            }
+        }
+
+        // Select a new pseudo-random map for the next round!
+        *active_map = crate::maps::ActiveMap::select_random();
+
         // Despawn both players from map
         for (entity, _, _) in players_query.iter() {
             commands.entity(entity).despawn();
@@ -109,6 +125,11 @@ fn check_player_death(
         // Clean up active bullets
         for proj_entity in proj_query.iter() {
             commands.entity(proj_entity).despawn();
+        }
+
+        // Sweep and despawn every single particle effect!
+        for particle_entity in particle_query.iter() {
+            commands.entity(particle_entity).despawn();
         }
 
         // Dead player gets to choose a card!
@@ -296,10 +317,17 @@ fn draw_rotated_rect(
 
 fn card_selection_input(
     keys: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    time: Res<Time>,
+    mut gamepad_cooldown: Local<f32>,
     mut state: ResMut<CardSelectionState>,
     mut persistent_stats: ResMut<PersistentPlayerStats>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
+    if *gamepad_cooldown > 0.0 {
+        *gamepad_cooldown = (*gamepad_cooldown - time.delta_secs()).max(0.0);
+    }
+
     let mut step = 0i32;
 
     if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) {
@@ -307,6 +335,27 @@ fn card_selection_input(
     }
     if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) {
         step = 1;
+    }
+
+    // Gamepad support for card selection
+    let gamepad = gamepads.iter().next();
+    if let Some(gp) = gamepad {
+        let left_stick = gp.left_stick();
+        if *gamepad_cooldown <= 0.0 {
+            if left_stick.x < -0.5 {
+                step = -1;
+                *gamepad_cooldown = 0.25; // 250ms scroll cooldown
+            } else if left_stick.x > 0.5 {
+                step = 1;
+                *gamepad_cooldown = 0.25; // 250ms scroll cooldown
+            }
+        }
+        if gp.just_pressed(GamepadButton::DPadLeft) {
+            step = -1;
+        }
+        if gp.just_pressed(GamepadButton::DPadRight) {
+            step = 1;
+        }
     }
 
     if step != 0 {
@@ -318,7 +367,14 @@ fn card_selection_input(
     }
 
     // Confirm selection
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyQ) {
+    let mut confirm = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyQ);
+    if let Some(gp) = gamepad {
+        if gp.just_pressed(GamepadButton::South) {
+            confirm = true;
+        }
+    }
+
+    if confirm {
         // Apply selected stats modifiers to the dead player
         let p_stats = match state.selecting_player {
             Player::P1 => &mut persistent_stats.p1,

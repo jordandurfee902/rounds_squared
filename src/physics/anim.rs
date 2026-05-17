@@ -1,10 +1,8 @@
 use bevy::prelude::*;
-use crate::player::Player;
+use crate::player::{Player, Health, PlayerStatsComponent, BlockComponent};
 use crate::physics::components::{Grounded, Velocity, WallContact};
-use crate::player::Health;
 use crate::physics::weapon::Weapon;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
-use crate::settings::PhysicsSettings;
 
 // --- COMPONENTS & ENUMS ---
 
@@ -46,9 +44,9 @@ impl Default for ProceduralLimbs {
 /// Converts screen mouse coordinates (P1) or IJKL keys / movement velocity (P2) into a normalized aim vector.
 pub fn update_aim(
     windows: Query<&Window>,
-    mut query: Query<(&Player, &Transform, &Velocity, &mut PlayerAim)>,
+    mut query: Query<(&Player, &Transform, &Velocity, &mut PlayerAim, &PlayerStatsComponent)>,
     keys: Res<ButtonInput<KeyCode>>,
-    settings: Res<PhysicsSettings>,
+    gamepads: Query<&Gamepad>,
 ) {
     let Some(window) = windows.iter().next() else {
         return;
@@ -76,7 +74,9 @@ pub fn update_aim(
         (width, height, 0.0, y)
     };
 
-    for (player, transform, velocity, mut aim) in query.iter_mut() {
+    let gamepad = gamepads.iter().next();
+
+    for (player, transform, velocity, mut aim, stats) in query.iter_mut() {
         match player {
             Player::P1 => {
                 if let Some(cursor) = cursor_pos {
@@ -92,7 +92,8 @@ pub fn update_aim(
                     let world_x = (u - 0.5) * TARGET_WIDTH;
                     let world_y = (0.5 - v) * TARGET_HEIGHT;
                     
-                    let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * settings.player_scale);
+                    let scale = stats.player_scale;
+                    let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * scale);
                     let target_dir = Vec2::new(world_x, world_y) - player_pos;
                     if target_dir.length_squared() > 1.0 {
                         aim.direction = target_dir.normalize();
@@ -100,22 +101,33 @@ pub fn update_aim(
                 }
             }
             Player::P2 => {
-                // Shared keyboard IJKL aiming mapping
-                let mut key_dir = Vec2::ZERO;
-                if keys.pressed(KeyCode::KeyI) { key_dir.y += 1.0; }
-                if keys.pressed(KeyCode::KeyK) { key_dir.y -= 1.0; }
-                if keys.pressed(KeyCode::KeyJ) { key_dir.x -= 1.0; }
-                if keys.pressed(KeyCode::KeyL) { key_dir.x += 1.0; }
+                let mut got_aim = false;
+                if let Some(gp) = gamepad {
+                    let stick = gp.right_stick();
+                    if stick.length_squared() > 0.05 {
+                        aim.direction = stick.normalize();
+                        got_aim = true;
+                    }
+                }
                 
-                if key_dir.length_squared() > 0.1 {
-                    aim.direction = key_dir.normalize();
-                } else {
-                    // Fall back to moving velocity direction, or face right (X) if stationary
-                    let vel = velocity.0;
-                    if vel.length_squared() > 10.0 {
-                        aim.direction = vel.normalize();
-                    } else if aim.direction == Vec2::ZERO {
-                        aim.direction = Vec2::X;
+                if !got_aim {
+                    // Shared keyboard IJKL aiming mapping
+                    let mut key_dir = Vec2::ZERO;
+                    if keys.pressed(KeyCode::KeyI) { key_dir.y += 1.0; }
+                    if keys.pressed(KeyCode::KeyK) { key_dir.y -= 1.0; }
+                    if keys.pressed(KeyCode::KeyJ) { key_dir.x -= 1.0; }
+                    if keys.pressed(KeyCode::KeyL) { key_dir.x += 1.0; }
+                    
+                    if key_dir.length_squared() > 0.1 {
+                        aim.direction = key_dir.normalize();
+                    } else {
+                        // Fall back to moving velocity direction, or face right (X) if stationary
+                        let vel = velocity.0;
+                        if vel.length_squared() > 10.0 {
+                            aim.direction = vel.normalize();
+                        } else if aim.direction == Vec2::ZERO {
+                            aim.direction = Vec2::X;
+                        }
                     }
                 }
             }
@@ -127,19 +139,19 @@ pub fn update_aim(
 pub fn update_and_draw_legs(
     time: Res<Time>,
     mut gizmos: Gizmos,
-    settings: Res<PhysicsSettings>,
     mut query: Query<(
         &Transform,
         &Velocity,
         &Grounded,
         &Player,
         &mut ProceduralLimbs,
+        &PlayerStatsComponent,
     )>,
 ) {
     let dt = time.delta_secs().min(0.05); // cap delta time to safeguard against frame lag spikes
-    let scale = settings.player_scale;
     
-    for (transform, velocity, grounded, player, mut limbs) in query.iter_mut() {
+    for (transform, velocity, grounded, player, mut limbs, stats) in query.iter_mut() {
+        let scale = stats.player_scale;
         let body_pos = transform.translation.xy();
         let vel = velocity.0;
         
@@ -282,11 +294,10 @@ fn draw_digital_number(
 /// Solves the weapon arms, aiming a gun with the dominant hand, and holding a floating white shield/orb with the supporting hand.
 pub fn draw_procedural_arms(
     mut gizmos: Gizmos,
-    settings: Res<PhysicsSettings>,
-    query: Query<(&Transform, &PlayerAim, &Player, &Weapon)>,
+    query: Query<(&Transform, &PlayerAim, &Player, &Weapon, &PlayerStatsComponent, &BlockComponent)>,
 ) {
-    let scale = settings.player_scale;
-    for (transform, aim, player, weapon) in query.iter() {
+    for (transform, aim, player, weapon, stats, block) in query.iter() {
+        let scale = stats.player_scale;
         let body_pos = transform.translation.xy();
         let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
         let aim_dir = aim.direction;
@@ -360,10 +371,52 @@ pub fn draw_procedural_arms(
         let shield_offset_x = if aim_dir.x >= 0.0 { -52.0 * scale } else { 52.0 * scale };
         let shield_center = visual_center + Vec2::new(shield_offset_x, 0.0);
         
-        // Draw solid floating white circle opposite to aim direction
-        let max_r = (10.0 * scale).round() as i32;
-        for r in 0..=max_r {
-            gizmos.circle_2d(shield_center, r as f32, Color::srgb(1.0, 1.0, 1.0));
+        let radius = 10.0 * scale;
+        
+        if block.cooldown_timer <= 0.0 {
+            // Fully charged: Draw completely filled solid white circle
+            let max_r = radius.round() as i32;
+            for r in 0..=max_r {
+                gizmos.circle_2d(shield_center, r as f32, Color::srgb(1.0, 1.0, 1.0));
+            }
+        } else {
+            // Reloading/cooldown: Draw circular border outline, and radial fill spinning around unit circle
+            gizmos.circle_2d(shield_center, radius, Color::srgb(1.0, 1.0, 1.0));
+            
+            // Refill percentage (goes from 0.0 to 1.0 as cooldown decreases)
+            let fill_pct = 1.0 - (block.cooldown_timer / block.block_cooldown).clamp(0.0, 1.0);
+            
+            // Draw radial fill lines sweeping around the unit circle
+            let steps = 36;
+            let max_step = (fill_pct * steps as f32).round() as i32;
+            for i in 0..max_step {
+                let pct = i as f32 / steps as f32;
+                // Clockwise sweep starting from the top (-PI/2)
+                let angle = -std::f32::consts::FRAC_PI_2 + pct * 2.0 * std::f32::consts::PI;
+                let end_point = shield_center + Vec2::new(angle.cos() * radius, angle.sin() * radius);
+                gizmos.line_2d(shield_center, end_point, Color::srgb(1.0, 1.0, 1.0));
+            }
+        }
+        
+        // If blocking is active (invincible duration), draw a beautiful, soft, blurry glowing shield bubble around the main body!
+        if block.active_timer > 0.0 {
+            // Pulsing glow factor
+            let pulse = (block.active_timer * 15.0).sin() * 0.05 + 0.95;
+            let base_radius = (40.0 * scale + 15.0) * pulse;
+            
+            // Draw 15 concentric circles with soft opacity scaling to simulate a blur filter!
+            for i in -7..=7 {
+                let offset = i as f32 * 1.5;
+                let dist_pct = (i as f32 / 7.0).abs();
+                let alpha = (1.0 - dist_pct) * 0.12; // soft drop-off gradient
+                
+                let ring_radius = base_radius + offset;
+                let color = match player {
+                    Player::P1 => Color::srgba(0.0, 0.85, 1.0, alpha), // Soft glowing cyan/turquoise (similar but not exact to P1 blue)
+                    Player::P2 => Color::srgba(1.0, 0.55, 0.1, alpha), // Soft glowing amber/deep-orange (similar but not exact to P2 orange)
+                };
+                gizmos.circle_2d(visual_center, ring_radius, color);
+            }
         }
         
         // Supporting hand anchor holding the floating white circle
@@ -391,11 +444,10 @@ pub fn draw_procedural_arms(
 /// Dynamically renders black pixel cartoon eyes and tilting eyebrows that express emotions based on stats.
 pub fn draw_expressive_faces(
     mut gizmos: Gizmos,
-    settings: Res<PhysicsSettings>,
-    query: Query<(&Transform, &PlayerAim, &Health, &Velocity, &Grounded, &WallContact)>,
+    query: Query<(&Transform, &PlayerAim, &Health, &Velocity, &Grounded, &WallContact, &PlayerStatsComponent)>,
 ) {
-    let scale = settings.player_scale;
-    for (transform, aim, health, velocity, grounded, wall) in query.iter() {
+    for (transform, aim, health, velocity, grounded, wall, stats) in query.iter() {
+        let scale = stats.player_scale;
         let body_pos = transform.translation.xy();
         let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
         let aim_dir = aim.direction;
@@ -635,3 +687,39 @@ fn draw_eyebrow(
     gizmos.line_2d(start, end, color);
     gizmos.line_2d(start + Vec2::new(0.0, 1.0 * scale), end + Vec2::new(0.0, 1.0 * scale), color);
 }
+
+/// Renders a UI score overlay in the top left corner with rows of blue and orange circles.
+pub fn draw_score_overlay(
+    mut gizmos: Gizmos,
+    score: Res<crate::settings::ScoreTracker>,
+) {
+    let half_width = TARGET_WIDTH / 2.0;
+    let half_height = TARGET_HEIGHT / 2.0;
+    let radius = 18.0; // Larger size to look very premium
+    let spacing = 48.0; // Larger spacing to comfortably fit the larger size
+    
+    // Player 1 (Blue) Row
+    let p1_color = Color::srgb(0.2, 0.5, 1.0);
+    let p1_y = half_height - 50.0;
+    for i in 0..score.p1_wins {
+        let pos = Vec2::new(-half_width + 45.0 + i as f32 * spacing, p1_y);
+        // Draw beautiful solid filled blue circle
+        let max_r = radius as i32;
+        for r in 0..=max_r {
+            gizmos.circle_2d(pos, r as f32, p1_color);
+        }
+    }
+    
+    // Player 2 (Orange) Row
+    let p2_color = Color::srgb(1.0, 0.6, 0.2);
+    let p2_y = half_height - 100.0;
+    for i in 0..score.p2_wins {
+        let pos = Vec2::new(-half_width + 45.0 + i as f32 * spacing, p2_y);
+        // Draw beautiful solid filled orange circle
+        let max_r = radius as i32;
+        for r in 0..=max_r {
+            gizmos.circle_2d(pos, r as f32, p2_color);
+        }
+    }
+}
+

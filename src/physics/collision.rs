@@ -2,54 +2,142 @@ use bevy::prelude::*;
 use crate::settings::PhysicsSettings;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
 use super::components::*;
+use crate::player::{Player, Health, BlockComponent, PlayerStatsComponent};
+use crate::physics::particles::spawn_damage_explosion;
 
 pub fn boundary_collision(
-    settings: Res<PhysicsSettings>,
-    mut query: Query<(&mut Transform, &mut Velocity, &Collider, &mut Grounded, &mut WallContact)>,
+    mut commands: Commands,
+    time: Res<Time>,
+    _settings: Res<PhysicsSettings>,
+    mut query: Query<(
+        &Player,
+        &mut Transform,
+        &mut Velocity,
+        &Collider,
+        &mut Grounded,
+        &mut WallContact,
+        &mut Health,
+        &mut BlockComponent,
+        &PlayerStatsComponent,
+    )>,
 ) {
     let half_width = TARGET_WIDTH / 2.0;
     let half_height = TARGET_HEIGHT / 2.0;
-    let restitution = settings.boundary_restitution;
+    let _elapsed = time.delta_secs(); // Use delta_secs elapsed helper or total elapsed
+    let total_elapsed = time.elapsed_secs();
+    // 0.5s grace period on level load to prevent spawn damage
+    let grace_period = total_elapsed < 0.5;
 
-    for (mut transform, mut velocity, collider, mut grounded, mut wall) in query.iter_mut() {
+    let mut seed = 0u32;
+    for (player, mut transform, mut velocity, collider, mut grounded, mut wall, mut health, mut block, stats) in query.iter_mut() {
+        seed += 1;
         if let Collider::Circle { radius } = collider {
             let mut pos = transform.translation.xy();
             let mut vel = velocity.0;
 
             // Horizontal bounds (with 1.0-pixel contact skin/buffer)
             if pos.x - radius <= -half_width + 1.0 {
-                if pos.x - radius < -half_width {
-                    pos.x = -half_width + radius;
+                if block.active_timer > 0.0 {
+                    // Border block deflect!
+                    vel.x = stats.block_border_boost;
+                    pos.x = -half_width + radius + 15.0; // push inside safely
+                    block.control_lockout_timer = 0.25; // Disable input control to carry launch momentum
+                    
+                    let ring_color = match player {
+                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
+                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
+                    };
+                    spawn_damage_explosion(&mut commands, Vec2::new(-half_width, pos.y), ring_color, 25.0, seed);
+                } else if !grace_period && vel.x < -10.0 {
+                    // Take boundary damage!
+                    health.current = (health.current - 34.0).max(0.0);
+                    vel.x = 1200.0; // tripled knockback (from 400.0)
+                    pos.x = -half_width + radius + 5.0;
+                    block.control_lockout_timer = 0.20; // Disable controls during knockback
+                    spawn_damage_explosion(&mut commands, Vec2::new(-half_width, pos.y), Color::srgb(1.0, 0.2, 0.2), 34.0, seed + 10);
+                } else {
+                    if pos.x - radius < -half_width {
+                        pos.x = -half_width + radius;
+                    }
+                    wall.left = true;
                 }
-                if vel.x < 0.0 {
-                    vel.x = vel.x.abs() * restitution;
-                }
-                wall.left = true;
             } else if pos.x + radius >= half_width - 1.0 {
-                if pos.x + radius > half_width {
-                    pos.x = half_width - radius;
+                if block.active_timer > 0.0 {
+                    // Border block deflect!
+                    vel.x = -stats.block_border_boost;
+                    pos.x = half_width - radius - 15.0; // push inside safely
+                    block.control_lockout_timer = 0.25; // Disable input control to carry launch momentum
+                    
+                    let ring_color = match player {
+                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
+                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
+                    };
+                    spawn_damage_explosion(&mut commands, Vec2::new(half_width, pos.y), ring_color, 25.0, seed + 1);
+                } else if !grace_period && vel.x > 10.0 {
+                    // Take boundary damage!
+                    health.current = (health.current - 34.0).max(0.0);
+                    vel.x = -1200.0; // tripled knockback (from -400.0)
+                    pos.x = half_width - radius - 5.0;
+                    block.control_lockout_timer = 0.20; // Disable controls during knockback
+                    spawn_damage_explosion(&mut commands, Vec2::new(half_width, pos.y), Color::srgb(1.0, 0.2, 0.2), 34.0, seed + 11);
+                } else {
+                    if pos.x + radius > half_width {
+                        pos.x = half_width - radius;
+                    }
+                    wall.right = true;
                 }
-                if vel.x > 0.0 {
-                    vel.x = -vel.x.abs() * restitution;
-                }
-                wall.right = true;
             }
 
             // Vertical bounds (with 1.0-pixel contact skin/buffer)
             if pos.y - radius <= -half_height + 1.0 {
-                if pos.y - radius < -half_height {
-                    pos.y = -half_height + radius;
+                if block.active_timer > 0.0 {
+                    // Border block deflect!
+                    vel.y = stats.block_border_boost;
+                    pos.y = -half_height + radius + 15.0; // push inside safely
+                    block.control_lockout_timer = 0.25; // Disable input control to carry launch momentum
+                    
+                    let ring_color = match player {
+                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
+                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
+                    };
+                    spawn_damage_explosion(&mut commands, Vec2::new(pos.x, -half_height), ring_color, 25.0, seed + 2);
+                } else if !grace_period && vel.y < -10.0 {
+                    // Take boundary damage!
+                    health.current = (health.current - 34.0).max(0.0);
+                    vel.y = 1200.0; // tripled knockback (from 400.0)
+                    pos.y = -half_height + radius + 5.0;
+                    block.control_lockout_timer = 0.20; // Disable controls during knockback
+                    spawn_damage_explosion(&mut commands, Vec2::new(pos.x, -half_height), Color::srgb(1.0, 0.2, 0.2), 34.0, seed + 12);
+                    grounded.0 = true;
+                } else {
+                    if pos.y - radius < -half_height {
+                        pos.y = -half_height + radius;
+                    }
+                    grounded.0 = true;
                 }
-                if vel.y < 0.0 {
-                    vel.y = vel.y.abs() * restitution;
-                }
-                grounded.0 = true;
             } else if pos.y + radius >= half_height - 1.0 {
-                if pos.y + radius > half_height {
-                    pos.y = half_height - radius;
-                }
-                if vel.y > 0.0 {
-                    vel.y = -vel.y.abs() * restitution;
+                if block.active_timer > 0.0 {
+                    // Border block deflect!
+                    vel.y = -stats.block_border_boost;
+                    pos.y = half_height - radius - 15.0; // push inside safely
+                    block.control_lockout_timer = 0.25; // Disable input control to carry launch momentum
+                    
+                    let ring_color = match player {
+                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
+                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
+                    };
+                    spawn_damage_explosion(&mut commands, Vec2::new(pos.x, half_height), ring_color, 25.0, seed + 3);
+                } else if !grace_period && vel.y > 10.0 {
+                    // Take boundary damage!
+                    health.current = (health.current - 34.0).max(0.0);
+                    vel.y = -1200.0; // tripled knockback (from -400.0)
+                    pos.y = half_height - radius - 5.0;
+                    block.control_lockout_timer = 0.20; // Disable controls during knockback
+                    spawn_damage_explosion(&mut commands, Vec2::new(pos.x, half_height), Color::srgb(1.0, 0.2, 0.2), 34.0, seed + 13);
+                } else {
+                    if pos.y + radius > half_height {
+                        pos.y = half_height - radius;
+                    }
                 }
             }
 

@@ -1,9 +1,8 @@
 {
     "physics": {
-        "gravity": -1600.0,
-        "player_speed": 600.0,
+        "gravity": -2500.0,
         "player_accel": 10.0,
-        "player_jump_force": 800.0,
+        "player_jump_force": 1000.0,
         "boundary_restitution": 0.0,
         "player_restitution": 0.5,
         "air_friction": 1.0,
@@ -12,33 +11,48 @@
         "wall_slide_speed": 150.0,
         "wall_jump_push_force": 800.0,
         "fast_fall_acceleration": 4000.0,
-        "air_accel": 25.0,
-        "player_scale": 1.50
+        "air_accel": 25.0
     },
-    "p1_weapon": {
-        "bullet_range": 2.2,
-        "bullet_speed": 1000.0,
-        "bullet_gravity": -600.0,
-        "bullet_damage": 12.0,
-        "bullet_size_mult": 1.1,
-        "bullet_growth": 10.0,
-        "max_ammo": 6,
-        "reload_time": 1.2,
-        "fire_rate": 0.35,
-        "special_effects": [
+    "p1_character": {
+        "health": 100.0, // player maximum health (HP points)
+        "speed": 600.0, // movement speed (pixels/second)
+        "size": 1.50, // character visual scale / multiplier
+        "damage": 12.0, // base projectile damage on impact (HP points)
+        "bullet_range": 10.0, // maximum flight range (seconds)
+        "bullet_speed": 1000.0, // projectile firing velocity (pixels/second)
+        "bullet_gravity": -600.0, // gravitational downward force on bullet (pixels/second^2)
+        "bullet_size_mult": 1.1, // projectile size scaling multiplier
+        "bullet_growth": 3, // rate of exponential damage growth per second in air (%)
+        "max_ammo": 6, // weapon clip / magazine capacity (bullets)
+        "reload_time": 1, // duration of weapon reload (seconds)
+        "fire_rate": 0.1, // delay between consecutive shots (seconds)
+        "bounces": 0, // number of bullet bounces off walls / platforms
+        "bounce_speed_multiplier": 0.75, // velocity retention factor after each bounce (75% retained)
+        "block_duration": 0.30, // invincibility duration on block (seconds)
+        "block_cooldown": 4.0, // wait time between block activations (seconds)
+        "block_border_boost": 1800.0, // velocity boost in opposite direction when blocking border (pixels/second)
+        "special_effects": [ // list of active unique card modifiers / perks
             "PoisonCloud"
         ]
     },
-    "p2_weapon": {
-        "bullet_range": 2.0,
-        "bullet_speed": 1350.0,
-        "bullet_gravity": 0.0,
-        "bullet_damage": 18.0,
-        "bullet_size_mult": 0.8,
-        "bullet_growth": 0.0,
-        "max_ammo": 20,
-        "reload_time": 1.0,
-        "fire_rate": 0.15,
-        "special_effects": []
+    "p2_character": {
+        "health": 100.0, // player maximum health (HP points)
+        "speed": 600.0, // movement speed (pixels/second)
+        "size": 1.50, // character visual scale / multiplier
+        "damage": 18.0, // base projectile damage on impact (HP points)
+        "bullet_range": 2.0, // maximum flight range (seconds)
+        "bullet_speed": 1350.0, // projectile firing velocity (pixels/second)
+        "bullet_gravity": 0.0, // gravitational downward force on bullet (pixels/second^2)
+        "bullet_size_mult": 0.8, // projectile size scaling multiplier
+        "bullet_growth": 0.0, // rate of exponential damage growth per second in air (%)
+        "max_ammo": 20, // weapon clip / magazine capacity (bullets)
+        "reload_time": 1.0, // duration of weapon reload (seconds)
+        "fire_rate": 0.15, // delay between consecutive shots (seconds)
+        "bounces": 0, // number of bullet bounces off walls / platforms
+        "bounce_speed_multiplier": 0.0, // velocity retention factor after each bounce (75% retained)
+        "block_duration": 0.30, // invincibility duration on block (seconds)
+        "block_cooldown": 4.0, // wait time between block activations (seconds)
+        "block_border_boost": 1800.0, // velocity boost in opposite direction when blocking border (pixels/second)
+        "special_effects": [] // list of active unique card modifiers / perks
     }
 }

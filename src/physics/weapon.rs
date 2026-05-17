@@ -3,7 +3,7 @@ use crate::player::{Player, Health};
 use crate::physics::components::{Velocity, Collider, Platform};
 use crate::physics::anim::PlayerAim;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
-use crate::settings::{PhysicsSettings, PersistentPlayerStats};
+use crate::settings::PersistentPlayerStats;
 use super::particles::{spawn_spark_burst, spawn_trail_particle, spawn_damage_explosion};
 
 // --- WEAPON CONFIGURATION COMPONENT ---
@@ -31,6 +31,9 @@ pub struct Projectile {
     pub time_in_air: f32,
     pub lifetime: f32,
     pub special_effects: Vec<String>,
+    pub player_scale: f32,
+    pub bounces: u32,
+    pub bounce_speed_multiplier: f32,
 }
 
 // --- REAL-TIME COOLDOWNS & RELOADS UPDATE SYSTEM ---
@@ -76,9 +79,11 @@ pub fn weapon_fire_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    gamepads: Query<&Gamepad>,
     persistent_stats: Res<PersistentPlayerStats>,
     mut query: Query<(&Player, &Transform, &PlayerAim, &mut Velocity, &mut Weapon)>,
 ) {
+    let gamepad = gamepads.iter().next();
     let mut seed_idx = 0u32;
     for (player, transform, aim, mut velocity, mut weapon) in query.iter_mut() {
         seed_idx += 1;
@@ -91,7 +96,13 @@ pub fn weapon_fire_system(
         // 1. Process manual reload keys (R for P1, P for P2)
         let manual_reload_pressed = match player {
             Player::P1 => keys.just_pressed(KeyCode::KeyR),
-            Player::P2 => keys.just_pressed(KeyCode::KeyP),
+            Player::P2 => {
+                if let Some(gp) = gamepad {
+                    gp.just_pressed(GamepadButton::West)
+                } else {
+                    keys.just_pressed(KeyCode::KeyP)
+                }
+            }
         };
 
         if manual_reload_pressed && weapon.current_ammo < weapon.max_ammo && weapon.reload_timer <= 0.0 {
@@ -102,7 +113,13 @@ pub fn weapon_fire_system(
         // 2. Process active firing inputs
         let is_firing = match player {
             Player::P1 => mouse.pressed(MouseButton::Left),
-            Player::P2 => keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::KeyO),
+            Player::P2 => {
+                if let Some(gp) = gamepad {
+                    gp.pressed(GamepadButton::RightTrigger)
+                } else {
+                    keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::KeyO)
+                }
+            }
         };
 
         if is_firing && weapon.current_ammo > 0 && weapon.fire_cooldown <= 0.0 && weapon.reload_timer <= 0.0 {
@@ -131,6 +148,9 @@ pub fn weapon_fire_system(
                     time_in_air: 0.0,
                     lifetime: p_stats.bullet_range,
                     special_effects: p_stats.special_effects.clone(),
+                    player_scale: p_stats.player_scale,
+                    bounces: p_stats.bounces,
+                    bounce_speed_multiplier: p_stats.bounce_speed_multiplier,
                 },
                 Transform::from_xyz(barrel_end.x, barrel_end.y, 11.0),
             ));
@@ -155,10 +175,9 @@ pub fn projectile_physics_system(
     mut commands: Commands,
     time: Res<Time>,
     mut gizmos: Gizmos,
-    settings: Res<PhysicsSettings>,
     mut projectiles: Query<(Entity, &mut Transform, &mut Projectile), (Without<Platform>, Without<Player>)>,
     platforms: Query<(&Transform, &Collider), (With<Platform>, Without<Projectile>, Without<Player>)>,
-    mut players: Query<(Entity, &Transform, &Collider, &Player, &mut Health, &crate::player::PlayerStatsComponent), (Without<Projectile>, Without<Platform>)>,
+    mut players: Query<(Entity, &Transform, &Collider, &Player, &mut Health, &crate::player::PlayerStatsComponent, &crate::player::BlockComponent), (Without<Projectile>, Without<Platform>)>,
 ) {
     let dt = time.delta_secs().min(0.05);
     let half_width = TARGET_WIDTH / 2.0;
@@ -183,7 +202,7 @@ pub fn projectile_physics_system(
         proj.damage = current_damage;
 
         // Solve dynamic visual and collision radius: sqrt(damage) * size_multiplier * player_scale
-        let scale = settings.player_scale;
+        let scale = proj.player_scale;
         let bullet_radius = current_damage.sqrt() * proj.size_multiplier * scale;
 
         // Print real-time dynamic growth stats so the user can verify them instantly in the console!
@@ -227,7 +246,59 @@ pub fn projectile_physics_system(
         }
 
         // 2. Check Playfield Boundaries
-        if curr_pos.x.abs() > half_width || curr_pos.y.abs() > half_height {
+        let mut out_of_bounds = false;
+        let spark_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
+            Color::srgb(0.2, 0.9, 0.2)
+        } else {
+            Color::srgb(0.8, 0.8, 0.8)
+        };
+
+        // Horizontal bounds check
+        if curr_pos.x.abs() > half_width {
+            let sign = curr_pos.x.signum();
+            if proj.bounces > 0 {
+                proj.velocity.x = -proj.velocity.x * proj.bounce_speed_multiplier;
+                proj.bounces -= 1;
+                proj_transform.translation.x = sign * (half_width - bullet_radius - 1.0);
+                spawn_damage_explosion(&mut commands, Vec2::new(sign * half_width, curr_pos.y), spark_color, proj.damage, rng_seed);
+            } else {
+                // Despawn and trigger particle explosion!
+                spawn_damage_explosion(&mut commands, Vec2::new(sign * half_width, curr_pos.y), spark_color, proj.damage, rng_seed);
+                out_of_bounds = true;
+            }
+        }
+
+        // Vertical bounds check (only run if not already marked out_of_bounds)
+        if !out_of_bounds && curr_pos.y.abs() > half_height {
+            let sign = curr_pos.y.signum();
+            if sign > 0.0 {
+                // Top border!
+                if proj.bounces > 0 {
+                    // Bounce off the top border
+                    proj.velocity.y = -proj.velocity.y * proj.bounce_speed_multiplier;
+                    proj.bounces -= 1;
+                    proj_transform.translation.y = half_height - bullet_radius - 1.0;
+                    spawn_damage_explosion(&mut commands, Vec2::new(curr_pos.x, half_height), spark_color, proj.damage, rng_seed);
+                } else {
+                    // 0 bounces: Allow to pass through the top border! Do NOT bounce, do NOT despawn, do NOT trigger particles!
+                }
+            } else {
+                // Bottom border!
+                if proj.bounces > 0 {
+                    // Bounce off bottom border
+                    proj.velocity.y = -proj.velocity.y * proj.bounce_speed_multiplier;
+                    proj.bounces -= 1;
+                    proj_transform.translation.y = -half_height + bullet_radius + 1.0;
+                    spawn_damage_explosion(&mut commands, Vec2::new(curr_pos.x, -half_height), spark_color, proj.damage, rng_seed);
+                } else {
+                    // Despawn and trigger particle explosion!
+                    spawn_damage_explosion(&mut commands, Vec2::new(curr_pos.x, -half_height), spark_color, proj.damage, rng_seed);
+                    out_of_bounds = true;
+                }
+            }
+        }
+
+        if out_of_bounds {
             commands.entity(proj_entity).despawn();
             continue;
         }
@@ -245,7 +316,6 @@ pub fn projectile_physics_system(
                 let closest_point = Vec2::new(clamped_x, clamped_y);
                 
                 if curr_pos.distance_squared(closest_point) <= bullet_radius * bullet_radius {
-                    hit_detected = true;
                     // Spawn platform landing explosion particles scaled by sqrt(damage)
                     let explosion_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
                         Color::srgb(0.2, 0.9, 0.2) // Green poison platform dust!
@@ -253,6 +323,26 @@ pub fn projectile_physics_system(
                         Color::srgb(0.8, 0.8, 0.8) // Standard gray platform dust!
                     };
                     spawn_damage_explosion(&mut commands, closest_point, explosion_color, proj.damage, rng_seed);
+
+                    if proj.bounces > 0 {
+                        let diff = curr_pos - closest_point;
+                        let normal = if diff.length_squared() > 1e-4 {
+                            diff.normalize()
+                        } else {
+                            -proj.velocity.normalize_or_zero()
+                        };
+                        
+                        let reflected = proj.velocity - 2.0 * proj.velocity.dot(normal) * normal;
+                        proj.velocity = reflected * proj.bounce_speed_multiplier;
+                        proj.bounces -= 1;
+
+                        // Reposition projectile to prevent double-collision sticking
+                        let new_pos = closest_point + normal * (bullet_radius + 1.0);
+                        proj_transform.translation.x = new_pos.x;
+                        proj_transform.translation.y = new_pos.y;
+                    } else {
+                        hit_detected = true;
+                    }
                     break;
                 }
             }
@@ -264,7 +354,7 @@ pub fn projectile_physics_system(
         }
 
         // 4. Collision Check: Enemy Players (using circle-to-circle combined radius)
-        for (_, player_trans, _, player_id, mut health, p_stats) in players.iter_mut() {
+        for (_, player_trans, _, player_id, mut health, p_stats, block) in players.iter_mut() {
             if *player_id == proj.owner {
                 continue; // Cannot hit self
             }
@@ -275,18 +365,47 @@ pub fn projectile_physics_system(
             let combined_radius = 40.0 * scale + bullet_radius;
 
             if dist_sq <= combined_radius * combined_radius {
-                hit_detected = true;
-                
-                // Deal dynamic damage and cap at 0
-                health.current = (health.current - proj.damage).max(0.0);
+                // If player is actively blocking (invincible), bounce/ricochet the bullet!
+                if block.active_timer > 0.0 {
+                    let diff = curr_pos - target_center;
+                    let normal = if diff.length_squared() > 1e-4 {
+                        diff.normalize()
+                    } else {
+                        -proj.velocity.normalize_or_zero()
+                    };
 
-                // Spawn landing particle explosion scaled by sqrt(damage)
-                let splatter_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
-                    Color::srgb(0.2, 0.9, 0.2) // Neon green poison splash explosion!
+                    let reflected = proj.velocity - 2.0 * proj.velocity.dot(normal) * normal;
+                    let speed_mult = if proj.bounce_speed_multiplier > 0.0 { proj.bounce_speed_multiplier } else { 1.0 };
+                    proj.velocity = reflected * speed_mult;
+                    
+                    if proj.bounces > 0 {
+                        proj.bounces -= 1;
+                    }
+
+                    // Ownership shifts to the blocking player! Excellent custom deflecting mechanic.
+                    proj.owner = *player_id;
+
+                    // Reposition projectile to prevent double-collision sticking
+                    let new_pos = target_center + normal * (combined_radius + 1.0);
+                    proj_transform.translation.x = new_pos.x;
+                    proj_transform.translation.y = new_pos.y;
+
+                    // Spawn impact shield splash effect
+                    spawn_damage_explosion(&mut commands, curr_pos, Color::srgb(0.5, 0.8, 1.0), proj.damage, rng_seed + 100);
                 } else {
-                    Color::srgb(1.0, 0.2, 0.2) // Dynamic red impact explosion!
-                };
-                spawn_damage_explosion(&mut commands, curr_pos, splatter_color, proj.damage, rng_seed + 50);
+                    hit_detected = true;
+                    
+                    // Deal dynamic damage and cap at 0
+                    health.current = (health.current - proj.damage).max(0.0);
+
+                    // Spawn landing particle explosion scaled by sqrt(damage)
+                    let splatter_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
+                        Color::srgb(0.2, 0.9, 0.2) // Neon green poison splash explosion!
+                    } else {
+                        Color::srgb(1.0, 0.2, 0.2) // Dynamic red impact explosion!
+                    };
+                    spawn_damage_explosion(&mut commands, curr_pos, splatter_color, proj.damage, rng_seed + 50);
+                }
                 break;
             }
         }

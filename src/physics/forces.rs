@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crate::settings::PhysicsSettings;
 use super::components::*;
-use crate::player::PlayerStatsComponent;
+use crate::player::{PlayerStatsComponent, BlockComponent};
 
 pub fn apply_gravity_and_movement(
     time: Res<Time>,
@@ -40,15 +40,27 @@ pub fn apply_gravity_and_movement(
 pub fn player_movement(
     time: Res<Time>,
     settings: Res<PhysicsSettings>,
-    mut query: Query<(&mut Velocity, &Grounded, &WallContact, &ControllerInput, &PlayerStatsComponent)>,
+    mut query: Query<(&mut Velocity, &Grounded, &WallContact, &ControllerInput, &PlayerStatsComponent, &BlockComponent, &mut JumpAllowance)>,
 ) {
     let dt = time.delta_secs();
-    for (mut velocity, grounded, wall, input, stats) in query.iter_mut() {
-        let target_speed = input.move_dir * stats.movement_speed;
+    for (mut velocity, grounded, wall, input, stats, block, mut jump_allowance) in query.iter_mut() {
+        // Reset jump allowance when on the ground or in contact with a wall/pillar
+        if grounded.0 || wall.left || wall.right {
+            jump_allowance.value = 1;
+        }
+
+        // Force horizontal inputs to 0.0 if a wall knockback or block deflect launch is active
+        let move_dir = if block.control_lockout_timer > 0.0 {
+            0.0
+        } else {
+            input.move_dir
+        };
+
+        let target_speed = move_dir * stats.movement_speed;
 
         // Ground Movement vs Air Strafing
         if grounded.0 {
-            if input.move_dir == 0.0 {
+            if move_dir == 0.0 {
                 // Ground sliding braking friction
                 let damping = (1.0 - settings.movement_stop_friction * dt).max(0.0);
                 velocity.0.x *= damping;
@@ -59,7 +71,7 @@ pub fn player_movement(
             }
         } else {
             // Air strafe (maintain high degree of directional control in mid-air)
-            if input.move_dir != 0.0 {
+            if move_dir != 0.0 {
                 let diff = target_speed - velocity.0.x;
                 velocity.0.x += diff * settings.air_accel * dt;
             }
@@ -70,14 +82,21 @@ pub fn player_movement(
             if grounded.0 {
                 // Normal Jump: momentum carries over from ground movement
                 velocity.0 = calculate_jump(velocity.0, stats.jump_force);
+                jump_allowance.value = 0; // Consume jump allowance
             } else if wall.left {
                 // Wall Leap off left wall: push up and outward to the right
                 velocity.0.y = stats.jump_force;
                 velocity.0.x = settings.wall_jump_push_force;
+                jump_allowance.value = 0;
             } else if wall.right {
                 // Wall Leap off right wall: push up and outward to the left
                 velocity.0.y = stats.jump_force;
                 velocity.0.x = -settings.wall_jump_push_force;
+                jump_allowance.value = 0;
+            } else if jump_allowance.value > 0 {
+                // Mid-air coyote jump: allowed because they walked off a ledge without jumping
+                velocity.0 = calculate_jump(velocity.0, stats.jump_force);
+                jump_allowance.value = 0; // Consume air jump allowance
             }
         }
     }

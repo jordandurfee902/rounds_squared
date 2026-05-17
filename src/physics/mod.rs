@@ -42,6 +42,9 @@ impl Plugin for PhysicsPlugin {
             draw_procedural_arms,
             draw_expressive_faces,
         ).chain().run_if(in_state(GameState::Gameplay)));
+
+        // Draw score UI overlay during all game states (Gameplay and Card Selection)
+        app.add_systems(Update, draw_score_overlay);
     }
 }
 
