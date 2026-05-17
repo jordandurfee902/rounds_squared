@@ -1,0 +1,15 @@
+{
+    "gravity": -1600.0,
+    "player_speed": 600.0,
+    "player_accel": 10.0,
+    "player_jump_force": 800.0,
+    "boundary_restitution": 0.0,
+    "player_restitution": 0.5,
+    "air_friction": 1.0,
+    "ground_friction": 1.0,
+    "movement_stop_friction": 10.0,
+    "wall_slide_speed": 150.0,
+    "wall_jump_push_force": 800.0,
+    "fast_fall_acceleration": 4000.0,
+    "air_accel": 25.0
+}
