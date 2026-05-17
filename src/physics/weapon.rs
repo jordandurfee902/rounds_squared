@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::player::{Player, Health};
-use crate::physics::components::{Velocity, Collider, Platform};
+use crate::physics::components::{Collider, Platform, ControllerInput};
 use crate::physics::anim::PlayerAim;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
 use crate::settings::PersistentPlayerStats;
@@ -77,33 +77,20 @@ pub fn weapon_update_system(
 // --- SHOOTING INPUTS & BARREL-END SPAWNING SYSTEM ---
 pub fn weapon_fire_system(
     mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    gamepads: Query<&Gamepad>,
     persistent_stats: Res<PersistentPlayerStats>,
-    mut query: Query<(&Player, &Transform, &PlayerAim, &mut Velocity, &mut Weapon)>,
+    mut query: Query<(&Player, &Transform, &PlayerAim, &ControllerInput, &mut Weapon)>,
 ) {
-    let gamepad = gamepads.iter().next();
     let mut seed_idx = 0u32;
-    for (player, transform, aim, mut velocity, mut weapon) in query.iter_mut() {
+    for (player, transform, aim, input, mut weapon) in query.iter_mut() {
         seed_idx += 1;
         
         let p_stats = match player {
             Player::P1 => &persistent_stats.p1,
             Player::P2 => &persistent_stats.p2,
         };
-        
-        // 1. Process manual reload keys (R for P1, P for P2)
-        let manual_reload_pressed = match player {
-            Player::P1 => keys.just_pressed(KeyCode::KeyR),
-            Player::P2 => {
-                if let Some(gp) = gamepad {
-                    gp.just_pressed(GamepadButton::West)
-                } else {
-                    keys.just_pressed(KeyCode::KeyP)
-                }
-            }
-        };
+
+        // 1. Process manual reload inputs
+        let manual_reload_pressed = input.reload;
 
         if manual_reload_pressed && weapon.current_ammo < weapon.max_ammo && weapon.reload_timer <= 0.0 {
             weapon.reload_timer = weapon.reload_time;
@@ -111,16 +98,7 @@ pub fn weapon_fire_system(
         }
 
         // 2. Process active firing inputs
-        let is_firing = match player {
-            Player::P1 => mouse.pressed(MouseButton::Left),
-            Player::P2 => {
-                if let Some(gp) = gamepad {
-                    gp.pressed(GamepadButton::RightTrigger)
-                } else {
-                    keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::KeyO)
-                }
-            }
-        };
+        let is_firing = input.fire;
 
         if is_firing && weapon.current_ammo > 0 && weapon.fire_cooldown <= 0.0 && weapon.reload_timer <= 0.0 {
             // Deduct ammo and update timers
@@ -138,7 +116,7 @@ pub fn weapon_fire_system(
             // Spawn Projectile Entity with dynamic settings
             commands.spawn((
                 Projectile {
-                    owner: *player,
+                    owner: player.clone(),
                     velocity: aim_dir * p_stats.bullet_speed,
                     base_damage: p_stats.bullet_damage,
                     damage: p_stats.bullet_damage,
@@ -155,9 +133,6 @@ pub fn weapon_fire_system(
                 Transform::from_xyz(barrel_end.x, barrel_end.y, 11.0),
             ));
 
-            // Apply satisfying physical recoil kick-back scaled by bullet damage!
-            let recoil_kick = p_stats.bullet_damage * 12.0;
-            velocity.0 -= aim_dir * recoil_kick;
 
             // Trigger beautiful muzzle flash spark burst scaled by bullet damage!
             let spark_color = match player {
@@ -224,10 +199,52 @@ pub fn projectile_physics_system(
             }
         };
 
-        // Render beautiful laser circle using the dynamic bullet_radius
-        gizmos.circle_2d(curr_pos, bullet_radius, bullet_color);
-        let trail_len = proj.velocity * 0.015;
-        gizmos.line_2d(curr_pos - trail_len, curr_pos, bullet_color);
+        // Render beautiful bullet visuals based on damage stage
+        if proj.damage >= 90.0 {
+            // --- FINAL COSMIC METEOR STAGE ---
+            // 1. Draw a beautiful, solid-feeling vector teardrop flame behind the meteor
+            let forward_dir = proj.velocity.normalize_or_zero();
+            let right_dir = Vec2::new(-forward_dir.y, forward_dir.x);
+            let tail_len = bullet_radius * 3.8;
+            let tail_tip = curr_pos - forward_dir * tail_len;
+            
+            // Draw nested overlapping triangles from the meteor outer shell tapering to a point
+            for t_pct in [0.2, 0.4, 0.6, 0.8, 1.0] {
+                let width = bullet_radius * t_pct;
+                let left_base = curr_pos + right_dir * width - forward_dir * (bullet_radius * 0.3);
+                let right_base = curr_pos - right_dir * width - forward_dir * (bullet_radius * 0.3);
+                
+                let color = if t_pct <= 0.4 {
+                    Color::srgba(1.0, 1.0, 1.0, 0.4) // White-hot inner flame core
+                } else if t_pct <= 0.7 {
+                    Color::srgba(0.9, 0.4, 1.0, 0.25) // Glowing violet mid-flame
+                } else {
+                    Color::srgba(0.6, 0.0, 1.0, 0.15) // Deep cosmic outer tail
+                };
+                
+                gizmos.line_2d(left_base, tail_tip, color);
+                gizmos.line_2d(right_base, tail_tip, color);
+                gizmos.line_2d(left_base, right_base, color);
+            }
+
+            // 2. Draw solid-looking packed concentric meteor spheres
+            for r_pct in [0.15, 0.35, 0.55, 0.75, 0.95, 1.0] {
+                let r = bullet_radius * r_pct;
+                let color = if r_pct <= 0.35 {
+                    Color::WHITE // Blinding white-hot solid center core
+                } else if r_pct <= 0.75 {
+                    Color::srgb(0.9, 0.4, 1.0) // Molten Violet mid shell
+                } else {
+                    Color::srgb(0.6, 0.0, 1.0) // Cosmic Neon Violet outer crust
+                };
+                gizmos.circle_2d(curr_pos, r, color);
+            }
+        } else {
+            // --- STANDARD BULLET RENDERING ---
+            gizmos.circle_2d(curr_pos, bullet_radius, bullet_color);
+            let trail_len = proj.velocity * 0.015;
+            gizmos.line_2d(curr_pos - trail_len, curr_pos, bullet_color);
+        }
 
         // Spawn beautiful physical trail particles scaled by sqrt(damage)
         spawn_trail_particle(

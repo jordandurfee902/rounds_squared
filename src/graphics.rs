@@ -16,17 +16,23 @@ impl Plugin for GraphicsPlugin {
 fn fit_viewport(
     windows: Query<&Window>,
     mut query: Query<&mut Camera, With<Camera2d>>,
+    state: Res<State<crate::settings::GameState>>,
 ) {
     let Some(window) = windows.iter().next() else {
         return;
     };
-    let window_width = window.width();
-    let window_height = window.height();
-    let window_aspect = window_width / window_height;
-
     let Some(mut camera) = query.iter_mut().next() else {
         return;
     };
+
+    if *state.get() == crate::settings::GameState::MainMenu || *state.get() == crate::settings::GameState::Lobby {
+        camera.viewport = None;
+        return;
+    }
+
+    let window_width = window.width();
+    let window_height = window.height();
+    let window_aspect = window_width / window_height;
 
     let (width, height, x, y) = if window_aspect > ASPECT_RATIO {
         // Pillarboxing (window is wider than 16:9)
@@ -49,10 +55,28 @@ fn fit_viewport(
     });
 }
 
-fn draw_border(mut gizmos: Gizmos) {
-    gizmos.rect_2d(
-        Vec2::ZERO,
-        Vec2::new(TARGET_WIDTH - 2.0, TARGET_HEIGHT - 2.0),
+fn draw_border(
+    mut gizmos: Gizmos,
+    state: Res<State<crate::settings::GameState>>,
+) {
+    if *state.get() == crate::settings::GameState::MainMenu || *state.get() == crate::settings::GameState::Lobby {
+        return;
+    }
+    // Only draw red borders on the left and right sides
+    let half_w = TARGET_WIDTH / 2.0 - 1.0;
+    let half_h = TARGET_HEIGHT / 2.0;
+    
+    // Left border line
+    gizmos.line_2d(
+        Vec2::new(-half_w, -half_h),
+        Vec2::new(-half_w, half_h),
+        Color::srgb(1.0, 0.0, 0.0),
+    );
+    
+    // Right border line
+    gizmos.line_2d(
+        Vec2::new(half_w, -half_h),
+        Vec2::new(half_w, half_h),
         Color::srgb(1.0, 0.0, 0.0),
     );
 }

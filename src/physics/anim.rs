@@ -3,7 +3,7 @@ use crate::player::{Player, Health, PlayerStatsComponent, BlockComponent};
 use crate::physics::components::{Grounded, Velocity, WallContact};
 use crate::physics::weapon::Weapon;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
-
+use crate::settings::{LobbySlots, InputDevice};
 // --- COMPONENTS & ENUMS ---
 
 #[derive(Component, Debug, Default, Clone, Copy, PartialEq)]
@@ -20,6 +20,15 @@ pub enum FootState {
         progress: f32, // 0.0 to 1.0 lerp progress
     },
     Airborne { current: Vec2 },
+}
+
+impl FootState {
+    pub fn is_zero(&self) -> bool {
+        match self {
+            FootState::Airborne { current } => current.length_squared() < 0.0001,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Component, Debug)]
@@ -47,6 +56,7 @@ pub fn update_aim(
     mut query: Query<(&Player, &Transform, &Velocity, &mut PlayerAim, &PlayerStatsComponent)>,
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    lobby_slots: Res<LobbySlots>,
 ) {
     let Some(window) = windows.iter().next() else {
         return;
@@ -74,59 +84,105 @@ pub fn update_aim(
         (width, height, 0.0, y)
     };
 
-    let gamepad = gamepads.iter().next();
-
     for (player, transform, velocity, mut aim, stats) in query.iter_mut() {
-        match player {
-            Player::P1 => {
-                if let Some(cursor) = cursor_pos {
-                    // Coordinates relative to the scaled viewport
-                    let rx = cursor.x - vp_x;
-                    let ry = cursor.y - vp_y;
-                    
-                    // Normalize to [0.0, 1.0] range
-                    let u = rx / vp_width;
-                    let v = ry / vp_height;
-                    
-                    // Scale into our camera's virtual space (-TARGET_WIDTH/2 to TARGET_WIDTH/2)
-                    let world_x = (u - 0.5) * TARGET_WIDTH;
-                    let world_y = (0.5 - v) * TARGET_HEIGHT;
-                    
-                    let scale = stats.player_scale;
-                    let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * scale);
-                    let target_dir = Vec2::new(world_x, world_y) - player_pos;
-                    if target_dir.length_squared() > 1.0 {
-                        aim.direction = target_dir.normalize();
+        let slot = match player {
+            Player::P1 => &lobby_slots.p1,
+            Player::P2 => &lobby_slots.p2,
+        };
+
+        if let Some(device) = slot {
+            match device {
+                InputDevice::KeyboardMouse => {
+                    if let Some(cursor) = cursor_pos {
+                        let rx = cursor.x - vp_x;
+                        let ry = cursor.y - vp_y;
+                        let u = rx / vp_width;
+                        let v = ry / vp_height;
+                        let world_x = (u - 0.5) * TARGET_WIDTH;
+                        let world_y = (0.5 - v) * TARGET_HEIGHT;
+                        
+                        let scale = stats.player_scale;
+                        let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * scale);
+                        let target_dir = Vec2::new(world_x, world_y) - player_pos;
+                        if target_dir.length_squared() > 1.0 {
+                            aim.direction = target_dir.normalize();
+                        }
                     }
                 }
-            }
-            Player::P2 => {
-                let mut got_aim = false;
-                if let Some(gp) = gamepad {
-                    let stick = gp.right_stick();
-                    if stick.length_squared() > 0.05 {
-                        aim.direction = stick.normalize();
-                        got_aim = true;
+                InputDevice::Gamepad(gp_entity) => {
+                    let mut got_aim = false;
+                    if let Ok(gp) = gamepads.get(*gp_entity) {
+                        // Retrieve raw unclamped axis values to bypass snapping axis deadzones
+                        let rx = gp.get_unclamped(GamepadAxis::RightStickX).unwrap_or(0.0);
+                        let ry = gp.get_unclamped(GamepadAxis::RightStickY).unwrap_or(0.0);
+                        let stick = Vec2::new(rx, ry);
+                        // Apply a smooth, fluid 360-degree circular deadzone
+                        if stick.length_squared() > 0.04 {
+                            aim.direction = stick.normalize();
+                            got_aim = true;
+                        }
                     }
-                }
-                
-                if !got_aim {
-                    // Shared keyboard IJKL aiming mapping
-                    let mut key_dir = Vec2::ZERO;
-                    if keys.pressed(KeyCode::KeyI) { key_dir.y += 1.0; }
-                    if keys.pressed(KeyCode::KeyK) { key_dir.y -= 1.0; }
-                    if keys.pressed(KeyCode::KeyJ) { key_dir.x -= 1.0; }
-                    if keys.pressed(KeyCode::KeyL) { key_dir.x += 1.0; }
-                    
-                    if key_dir.length_squared() > 0.1 {
-                        aim.direction = key_dir.normalize();
-                    } else {
-                        // Fall back to moving velocity direction, or face right (X) if stationary
+                    if !got_aim {
                         let vel = velocity.0;
                         if vel.length_squared() > 10.0 {
                             aim.direction = vel.normalize();
                         } else if aim.direction == Vec2::ZERO {
                             aim.direction = Vec2::X;
+                        }
+                    }
+                }
+            }
+        } else {
+            // FALLBACK / DEFAULTS
+            match player {
+                Player::P1 => {
+                    if let Some(cursor) = cursor_pos {
+                        let rx = cursor.x - vp_x;
+                        let ry = cursor.y - vp_y;
+                        let u = rx / vp_width;
+                        let v = ry / vp_height;
+                        let world_x = (u - 0.5) * TARGET_WIDTH;
+                        let world_y = (0.5 - v) * TARGET_HEIGHT;
+                        
+                        let scale = stats.player_scale;
+                        let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * scale);
+                        let target_dir = Vec2::new(world_x, world_y) - player_pos;
+                        if target_dir.length_squared() > 1.0 {
+                            aim.direction = target_dir.normalize();
+                        }
+                    }
+                }
+                Player::P2 => {
+                    let mut got_aim = false;
+                    let first_gamepad = gamepads.iter().next();
+                    if let Some(gp) = first_gamepad {
+                        // Retrieve raw unclamped axis values to bypass snapping axis deadzones
+                        let rx = gp.get_unclamped(GamepadAxis::RightStickX).unwrap_or(0.0);
+                        let ry = gp.get_unclamped(GamepadAxis::RightStickY).unwrap_or(0.0);
+                        let stick = Vec2::new(rx, ry);
+                        // Apply a smooth, fluid 360-degree circular deadzone
+                        if stick.length_squared() > 0.04 {
+                            aim.direction = stick.normalize();
+                            got_aim = true;
+                        }
+                    }
+                    
+                    if !got_aim {
+                        let mut key_dir = Vec2::ZERO;
+                        if keys.pressed(KeyCode::KeyI) { key_dir.y += 1.0; }
+                        if keys.pressed(KeyCode::KeyK) { key_dir.y -= 1.0; }
+                        if keys.pressed(KeyCode::KeyJ) { key_dir.x -= 1.0; }
+                        if keys.pressed(KeyCode::KeyL) { key_dir.x += 1.0; }
+                        
+                        if key_dir.length_squared() > 0.1 {
+                            aim.direction = key_dir.normalize();
+                        } else {
+                            let vel = velocity.0;
+                            if vel.length_squared() > 10.0 {
+                                aim.direction = vel.normalize();
+                            } else if aim.direction == Vec2::ZERO {
+                                aim.direction = Vec2::X;
+                            }
                         }
                     }
                 }
@@ -155,7 +211,7 @@ pub fn update_and_draw_legs(
         let body_pos = transform.translation.xy();
         let vel = velocity.0;
         
-        let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
+        let visual_center = body_pos + Vec2::new(0.0, 15.0 * scale);
         
         // Offset hips relative to player's visual center (lifted higher so legs are extended upright!)
         let left_hip = visual_center + Vec2::new(-16.0, -15.0) * scale;
@@ -171,6 +227,18 @@ pub fn update_and_draw_legs(
         }
         
         let ground_y = body_pos.y - 40.0 * scale;
+        
+        // Initialize foot positions if they are at the center of the world (Vec2::ZERO) at startup
+        if limbs.left_foot.is_zero() {
+            limbs.left_foot = FootState::Planted {
+                position: Vec2::new(left_hip.x, ground_y),
+            };
+        }
+        if limbs.right_foot.is_zero() {
+            limbs.right_foot = FootState::Planted {
+                position: Vec2::new(right_hip.x, ground_y),
+            };
+        }
         
         // 1. Process left foot stride
         limbs.left_foot = process_foot(
@@ -200,9 +268,9 @@ pub fn update_and_draw_legs(
             scale,
         );
         
-        // Segment lengths: 32px upper thigh, 28px lower shin
-        let l1 = 32.0 * scale;
-        let l2 = 28.0 * scale;
+        // Segment lengths: 26px upper thigh, 22px lower shin
+        let l1 = 26.0 * scale;
+        let l2 = 22.0 * scale;
         
         // Draw Left Noodle Leg
         let left_current = get_foot_pos(limbs.left_foot, scale);
@@ -299,7 +367,7 @@ pub fn draw_procedural_arms(
     for (transform, aim, player, weapon, stats, block) in query.iter() {
         let scale = stats.player_scale;
         let body_pos = transform.translation.xy();
-        let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
+        let visual_center = body_pos + Vec2::new(0.0, 15.0 * scale);
         let aim_dir = aim.direction;
         
         // Arm colors
@@ -556,9 +624,9 @@ fn process_foot(
         };
         
         let target_offset = Vec2::new(
-            side_offset - velocity.x * 0.005, // gravity effect: stay more directly under player when moving horizontally
-            -38.0 * scale - velocity.y * 0.002,       // reduced elasticity: stretch less when jumping or falling
-        ).clamp_length_max(42.0 * scale);             // keep target well within physical reach to preserve organic bend
+            side_offset - velocity.x * 0.0005, // reduced flailing: stay much more directly under player when moving horizontally
+            -30.0 * scale,                     // no elasticity: do not stretch or shrink when jumping or falling
+        ).clamp_length_max(34.0 * scale);             // keep target well within physical reach to preserve organic bend
         let target_pos = hip_pos + target_offset;
         
         let new_pos = current_pos + (target_pos - current_pos) * dt * 10.0;
@@ -692,7 +760,11 @@ fn draw_eyebrow(
 pub fn draw_score_overlay(
     mut gizmos: Gizmos,
     score: Res<crate::settings::ScoreTracker>,
+    state: Res<State<crate::settings::GameState>>,
 ) {
+    if *state.get() == crate::settings::GameState::MainMenu || *state.get() == crate::settings::GameState::Lobby {
+        return;
+    }
     let half_width = TARGET_WIDTH / 2.0;
     let half_height = TARGET_HEIGHT / 2.0;
     let radius = 18.0; // Larger size to look very premium

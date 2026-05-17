@@ -46,6 +46,9 @@ pub struct ControllerInput {
     pub move_dir: f32,
     pub jump: bool,
     pub fast_fall: bool,
+    pub fire: bool,
+    pub reload: bool,
+    pub block: bool,
 }
 
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]

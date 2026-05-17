@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SETS - Rounds Squared</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background-color: #0d0d0d;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="bevy-canvas"></canvas>
+
+    <script type="module">
+        import init from './out/SETS.js';
+
+        async function run() {
+            try {
+                console.log("Loading SETS WebAssembly...");
+                await init();
+                console.log("SETS WebAssembly loaded successfully!");
+            } catch (error) {
+                console.error("Error loading SETS WebAssembly:", error);
+            }
+        }
+
+        run();
+    </script>
+</body>
+</html>

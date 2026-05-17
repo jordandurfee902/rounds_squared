@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crate::physics::*;
 use crate::physics::weapon::Weapon;
-use crate::settings::{PersistentPlayerStats, GameState};
+use crate::settings::{PersistentPlayerStats, GameState, LobbySlots, InputDevice, KeyboardControls, ControllerControls, parse_key_code, parse_gamepad_button, parse_mouse_button};
 
 pub struct PlayerPlugin;
 
@@ -11,6 +11,8 @@ impl Plugin for PlayerPlugin {
            .add_systems(Update, (
                player_input.before(crate::physics::forces::apply_gravity_and_movement),
                player_block_system,
+           ).chain().run_if(in_state(GameState::Gameplay).and(crate::physics::is_not_paused).and(resource_equals(crate::net::IsNetworked(false)))))
+           .add_systems(Update, (
                draw_health_bars,
            ).run_if(in_state(GameState::Gameplay)));
     }
@@ -28,7 +30,7 @@ pub struct Health {
     pub max: f32,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct PlayerStatsComponent {
     pub movement_speed: f32,
     pub jump_force: f32,
@@ -39,7 +41,7 @@ pub struct PlayerStatsComponent {
     pub block_border_boost: f32,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct BlockComponent {
     pub active_timer: f32,
     pub cooldown_timer: f32,
@@ -151,11 +153,11 @@ pub fn spawn_players(
             time_since_last_shot: 0.0,
         },
     )).with_children(|parent| {
-        // Spawn visual body offset upwards by 25px to float perfectly on legs!
+        // Spawn visual body offset upwards by 15px to float perfectly on legs!
         parent.spawn((
             Mesh2d(meshes.add(Circle::new(40.0 * p1_scale))),
             MeshMaterial2d(materials.add(Color::srgb(0.2, 0.5, 1.0))),
-            Transform::from_xyz(0.0, 25.0 * p1_scale, 0.0),
+            Transform::from_xyz(0.0, 15.0 * p1_scale, 0.0),
         ));
     });
 
@@ -204,49 +206,114 @@ pub fn spawn_players(
             time_since_last_shot: 0.0,
         },
     )).with_children(|parent| {
-        // Spawn visual body offset upwards by 25px to float perfectly on legs!
+        // Spawn visual body offset upwards by 15px to float perfectly on legs!
         parent.spawn((
             Mesh2d(meshes.add(Circle::new(40.0 * p2_scale))),
             MeshMaterial2d(materials.add(Color::srgb(1.0, 0.5, 0.2))),
-            Transform::from_xyz(0.0, 25.0 * p2_scale, 0.0),
+            Transform::from_xyz(0.0, 15.0 * p2_scale, 0.0),
         ));
     });
 }
 
 fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&Player, &mut ControllerInput)>,
     gamepads: Query<&Gamepad>,
+    lobby_slots: Res<LobbySlots>,
+    kb_controls: Res<KeyboardControls>,
+    ctrl_controls: Res<ControllerControls>,
 ) {
-    let gamepad = gamepads.iter().next();
-
     for (player, mut input) in query.iter_mut() {
         let mut move_dir = 0.0;
         let mut jump = false;
         let mut fast_fall = false;
+        let mut fire = false;
+        let mut reload = false;
+        let mut block = false;
 
-        match player {
-            Player::P1 => {
-                if keys.pressed(KeyCode::KeyA) { move_dir -= 1.0; }
-                if keys.pressed(KeyCode::KeyD) { move_dir += 1.0; }
-                if keys.just_pressed(KeyCode::KeyW) { jump = true; }
-                if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
+        let slot = match player {
+            Player::P1 => &lobby_slots.p1,
+            Player::P2 => &lobby_slots.p2,
+        };
+
+        if let Some(device) = slot {
+            match device {
+                InputDevice::KeyboardMouse => {
+                    let left_key = parse_key_code(&kb_controls.move_left).unwrap_or(KeyCode::KeyA);
+                    let right_key = parse_key_code(&kb_controls.move_right).unwrap_or(KeyCode::KeyD);
+                    let jump_key = parse_key_code(&kb_controls.jump).unwrap_or(KeyCode::KeyW);
+                    let fast_fall_key = parse_key_code(&kb_controls.fast_fall).unwrap_or(KeyCode::KeyS);
+                    let reload_key = parse_key_code(&kb_controls.reload).unwrap_or(KeyCode::KeyR);
+                    let block_key = parse_key_code(&kb_controls.block).unwrap_or(KeyCode::KeyX);
+
+                    if keys.pressed(left_key) { move_dir -= 1.0; }
+                    if keys.pressed(right_key) { move_dir += 1.0; }
+                    if keys.just_pressed(jump_key) { jump = true; }
+                    if keys.pressed(fast_fall_key) { fast_fall = true; }
+                    if keys.just_pressed(reload_key) { reload = true; }
+                    
+                    if let Some(mb) = parse_mouse_button(&kb_controls.block) {
+                        if mouse.just_pressed(mb) { block = true; }
+                    } else if keys.just_pressed(block_key) {
+                        block = true;
+                    }
+
+                    if let Some(mb) = parse_mouse_button(&kb_controls.shoot) {
+                        if mouse.pressed(mb) { fire = true; }
+                    } else if let Some(kc) = parse_key_code(&kb_controls.shoot) {
+                        if keys.pressed(kc) { fire = true; }
+                    } else {
+                        if mouse.pressed(MouseButton::Left) { fire = true; }
+                    }
+                }
+                InputDevice::Gamepad(gp_entity) => {
+                    if let Ok(gp) = gamepads.get(*gp_entity) {
+                        let stick = gp.left_stick();
+                        move_dir = stick.x;
+                        let jump_btn = parse_gamepad_button(&ctrl_controls.jump).unwrap_or(GamepadButton::South);
+                        if gp.just_pressed(jump_btn) { jump = true; }
+                        if stick.y < -0.5 { fast_fall = true; }
+                        let reload_btn = parse_gamepad_button(&ctrl_controls.reload).unwrap_or(GamepadButton::West);
+                        if gp.just_pressed(reload_btn) { reload = true; }
+                        let shoot_btn = parse_gamepad_button(&ctrl_controls.shoot).unwrap_or(GamepadButton::RightTrigger2);
+                        if gp.pressed(shoot_btn) { fire = true; }
+                        let block_btn = parse_gamepad_button(&ctrl_controls.block).unwrap_or(GamepadButton::LeftTrigger2);
+                        if gp.just_pressed(block_btn) { block = true; }
+                    }
+                }
             }
-            Player::P2 => {
-                if let Some(gp) = gamepad {
-                    let stick = gp.left_stick();
-                    move_dir = stick.x;
-                    if gp.just_pressed(GamepadButton::South) {
-                        jump = true;
+        } else {
+            // FALLBACK / DEFAULTS
+            match player {
+                Player::P1 => {
+                    if keys.pressed(KeyCode::KeyA) { move_dir -= 1.0; }
+                    if keys.pressed(KeyCode::KeyD) { move_dir += 1.0; }
+                    if keys.just_pressed(KeyCode::KeyW) { jump = true; }
+                    if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
+                    if keys.just_pressed(KeyCode::KeyR) { reload = true; }
+                    if mouse.just_pressed(MouseButton::Right) { block = true; }
+                    if mouse.pressed(MouseButton::Left) { fire = true; }
+                }
+                Player::P2 => {
+                    let first_gamepad = gamepads.iter().next();
+                    if let Some(gp) = first_gamepad {
+                        let stick = gp.left_stick();
+                        move_dir = stick.x;
+                        if gp.just_pressed(GamepadButton::South) { jump = true; }
+                        if stick.y < -0.5 { fast_fall = true; }
+                        if gp.just_pressed(GamepadButton::West) { reload = true; }
+                        if gp.just_pressed(GamepadButton::LeftTrigger2) { block = true; }
+                        if gp.pressed(GamepadButton::RightTrigger2) { fire = true; }
+                    } else {
+                        if keys.pressed(KeyCode::ArrowLeft) { move_dir -= 1.0; }
+                        if keys.pressed(KeyCode::ArrowRight) { move_dir += 1.0; }
+                        if keys.just_pressed(KeyCode::ArrowUp) { jump = true; }
+                        if keys.pressed(KeyCode::ArrowDown) { fast_fall = true; }
+                        if keys.just_pressed(KeyCode::KeyU) { block = true; }
+                        if keys.just_pressed(KeyCode::KeyI) { reload = true; }
+                        if keys.pressed(KeyCode::Space) { fire = true; }
                     }
-                    if stick.y < -0.5 {
-                        fast_fall = true;
-                    }
-                } else {
-                    if keys.pressed(KeyCode::ArrowLeft) { move_dir -= 1.0; }
-                    if keys.pressed(KeyCode::ArrowRight) { move_dir += 1.0; }
-                    if keys.just_pressed(KeyCode::ArrowUp) { jump = true; }
-                    if keys.pressed(KeyCode::ArrowDown) { fast_fall = true; }
                 }
             }
         }
@@ -254,6 +321,9 @@ fn player_input(
         input.move_dir = move_dir;
         input.jump = jump;
         input.fast_fall = fast_fall;
+        input.fire = fire;
+        input.reload = reload;
+        input.block = block;
     }
 }
 
@@ -328,15 +398,11 @@ fn draw_health_bars(
 
 pub fn player_block_system(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    gamepads: Query<&Gamepad>,
-    mut query: Query<(&Player, &mut BlockComponent)>,
+    mut query: Query<(&ControllerInput, &mut BlockComponent)>,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let gamepad = gamepads.iter().next();
 
-    for (player, mut block) in query.iter_mut() {
+    for (input, mut block) in query.iter_mut() {
         if block.active_timer > 0.0 {
             block.active_timer = (block.active_timer - dt).max(0.0);
         }
@@ -347,16 +413,7 @@ pub fn player_block_system(
             block.control_lockout_timer = (block.control_lockout_timer - dt).max(0.0);
         }
 
-        let block_pressed = match player {
-            Player::P1 => mouse.just_pressed(MouseButton::Right),
-            Player::P2 => {
-                if let Some(gp) = gamepad {
-                    gp.just_pressed(GamepadButton::LeftTrigger)
-                } else {
-                    keys.just_pressed(KeyCode::KeyU)
-                }
-            }
-        };
+        let block_pressed = input.block;
 
         if block_pressed && block.cooldown_timer <= 0.0 {
             block.active_timer = block.block_duration;

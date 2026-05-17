@@ -5,6 +5,9 @@ pub mod anim;
 pub mod weapon;
 pub mod particles;
 pub mod card_selection;
+pub mod card_list_ui;
+pub mod menu_ui;
+pub mod lobby_ui;
 
 pub use components::*;
 pub use forces::*;
@@ -19,7 +22,12 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(card_selection::CardSelectionPlugin);
+        app.add_plugins(card_list_ui::CardListUiPlugin);
+        app.add_plugins(menu_ui::MenuUiPlugin);
+        app.add_plugins(lobby_ui::LobbyUiPlugin);
 
+        // Core physics simulation & firing updates (suspended when paused)
+        // 1. Local play (NOT networked)
         app.add_systems(Update, (
             apply_acceleration,
             apply_gravity_and_movement,
@@ -30,13 +38,43 @@ impl Plugin for PhysicsPlugin {
             boundary_collision,
             player_collision,
             player_platform_collision,
-            // Weapon & Projectile Physics
             weapon::weapon_update_system,
             weapon::weapon_fire_system,
             weapon::projectile_physics_system,
-            // Optimized Particles updates
+        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(resource_equals(crate::net::IsNetworked(false)))));
+
+        // 2. Online P2P play (GGRS rollback schedule)
+        app.add_systems(bevy_ggrs::GgrsSchedule, (
+            crate::net::unpack_network_inputs,
+            apply_acceleration,
+            apply_gravity_and_movement,
+            player_movement,
+            crate::player::player_block_system,
+            apply_friction,
+            apply_velocity,
+            reset_collision_states,
+            boundary_collision,
+            player_collision,
+            player_platform_collision,
+            weapon::weapon_update_system,
+            weapon::weapon_fire_system,
+            weapon::projectile_physics_system,
+        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused)));
+
+        app.add_systems(bevy_ggrs::GgrsSchedule, (
+            crate::net::lobby_sync_network_system,
+        ).run_if(in_state(GameState::Lobby)));
+
+        // Register GGRS input capture system
+        app.add_systems(bevy_ggrs::ReadInputs, crate::net::ggrs_input_system);
+
+        // 3. Purely visual particles (always in Update loop in both modes)
+        app.add_systems(Update, (
             particles::update_particles,
-            // Noodle animation & aim updates
+        ).run_if(in_state(GameState::Gameplay).and(is_not_paused)));
+
+        // Noodle drawing and visual systems (continue running while paused to draw visual frames)
+        app.add_systems(Update, (
             update_aim,
             update_and_draw_legs,
             draw_procedural_arms,
@@ -76,4 +114,13 @@ fn apply_velocity(
     for (mut transform, velocity) in query.iter_mut() {
         transform.translation += velocity.0.extend(0.0) * dt;
     }
+}
+
+pub fn is_not_paused(
+    paused: Option<Res<menu_ui::Paused>>,
+    delay: Option<Res<menu_ui::GameplayInputDelay>>,
+) -> bool {
+    let p_ok = if let Some(p) = paused { !p.0 } else { true };
+    let d_ok = if let Some(d) = delay { d.0 <= 0.0 } else { true };
+    p_ok && d_ok
 }

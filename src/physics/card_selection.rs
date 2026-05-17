@@ -7,7 +7,7 @@ pub struct CardSelectionPlugin;
 
 impl Plugin for CardSelectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, check_player_death.run_if(in_state(GameState::Gameplay)))
+        app.add_systems(Update, check_player_death.run_if(in_state(GameState::Gameplay).and(crate::physics::is_not_paused)))
            .add_systems(OnEnter(GameState::CardSelection), setup_card_selection)
            .add_systems(OnExit(GameState::CardSelection), cleanup_card_selection)
            .add_systems(Update, (
@@ -380,6 +380,8 @@ fn card_selection_input(
             Player::P1 => &mut persistent_stats.p1,
             Player::P2 => &mut persistent_stats.p2,
         };
+
+        p_stats.cards.push(state.selected_idx);
 
         match state.selected_idx {
             0 => { // Fast & Light
