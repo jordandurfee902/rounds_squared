@@ -1,11 +1,14 @@
 use bevy::prelude::*;
 use crate::physics::{Collider, Platform};
 
+use crate::settings::GameState;
+
 pub struct MapPlugin;
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_platforms);
+        app.add_systems(OnEnter(GameState::Gameplay), spawn_platforms)
+           .add_systems(OnExit(GameState::Gameplay), despawn_platforms);
     }
 }
 
@@ -147,4 +150,13 @@ fn spawn_platforms(
         Vec3::new(1100.0, 700.0, 5.0),
         platform_color,
     );
+}
+
+fn despawn_platforms(
+    mut commands: Commands,
+    query: Query<Entity, With<Platform>>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
 }

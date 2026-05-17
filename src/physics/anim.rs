@@ -2,7 +2,9 @@ use bevy::prelude::*;
 use crate::player::Player;
 use crate::physics::components::{Grounded, Velocity, WallContact};
 use crate::player::Health;
+use crate::physics::weapon::Weapon;
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
+use crate::settings::PhysicsSettings;
 
 // --- COMPONENTS & ENUMS ---
 
@@ -46,6 +48,7 @@ pub fn update_aim(
     windows: Query<&Window>,
     mut query: Query<(&Player, &Transform, &Velocity, &mut PlayerAim)>,
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Res<PhysicsSettings>,
 ) {
     let Some(window) = windows.iter().next() else {
         return;
@@ -89,7 +92,7 @@ pub fn update_aim(
                     let world_x = (u - 0.5) * TARGET_WIDTH;
                     let world_y = (0.5 - v) * TARGET_HEIGHT;
                     
-                    let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0);
+                    let player_pos = transform.translation.xy() + Vec2::new(0.0, 25.0 * settings.player_scale);
                     let target_dir = Vec2::new(world_x, world_y) - player_pos;
                     if target_dir.length_squared() > 1.0 {
                         aim.direction = target_dir.normalize();
@@ -124,6 +127,7 @@ pub fn update_aim(
 pub fn update_and_draw_legs(
     time: Res<Time>,
     mut gizmos: Gizmos,
+    settings: Res<PhysicsSettings>,
     mut query: Query<(
         &Transform,
         &Velocity,
@@ -133,16 +137,17 @@ pub fn update_and_draw_legs(
     )>,
 ) {
     let dt = time.delta_secs().min(0.05); // cap delta time to safeguard against frame lag spikes
+    let scale = settings.player_scale;
     
     for (transform, velocity, grounded, player, mut limbs) in query.iter_mut() {
         let body_pos = transform.translation.xy();
         let vel = velocity.0;
         
-        let visual_center = body_pos + Vec2::new(0.0, 25.0);
+        let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
         
         // Offset hips relative to player's visual center (lifted higher so legs are extended upright!)
-        let left_hip = visual_center + Vec2::new(-16.0, -15.0);
-        let right_hip = visual_center + Vec2::new(16.0, -15.0);
+        let left_hip = visual_center + Vec2::new(-16.0, -15.0) * scale;
+        let right_hip = visual_center + Vec2::new(16.0, -15.0) * scale;
         
         let color = match player {
             Player::P1 => Color::srgb(0.1, 0.35, 0.8), // Deep P1 Blue
@@ -153,7 +158,7 @@ pub fn update_and_draw_legs(
             limbs.step_cooldown -= dt;
         }
         
-        let ground_y = body_pos.y - 40.0;
+        let ground_y = body_pos.y - 40.0 * scale;
         
         // 1. Process left foot stride
         limbs.left_foot = process_foot(
@@ -164,8 +169,9 @@ pub fn update_and_draw_legs(
             limbs.left_foot,
             limbs.right_foot,
             &mut limbs.step_cooldown,
-            -16.0,
+            -16.0 * scale,
             ground_y,
+            scale,
         );
         
         // 2. Process right foot stride
@@ -177,34 +183,112 @@ pub fn update_and_draw_legs(
             limbs.right_foot,
             limbs.left_foot,
             &mut limbs.step_cooldown,
-            16.0,
+            16.0 * scale,
             ground_y,
+            scale,
         );
         
         // Segment lengths: 32px upper thigh, 28px lower shin
-        let l1 = 32.0;
-        let l2 = 28.0;
+        let l1 = 32.0 * scale;
+        let l2 = 28.0 * scale;
         
         // Draw Left Noodle Leg
-        let left_current = get_foot_pos(limbs.left_foot);
+        let left_current = get_foot_pos(limbs.left_foot, scale);
         let left_knee = solve_ik_2d(left_hip, left_current, l1, l2, false);
-        draw_connected_noodle(&mut gizmos, left_hip, left_knee, left_current, color);
+        draw_connected_noodle(&mut gizmos, left_hip, left_knee, left_current, color, scale);
         
         // Draw Right Noodle Leg
-        let right_current = get_foot_pos(limbs.right_foot);
+        let right_current = get_foot_pos(limbs.right_foot, scale);
         let right_knee = solve_ik_2d(right_hip, right_current, l1, l2, true);
-        draw_connected_noodle(&mut gizmos, right_hip, right_knee, right_current, color);
+        draw_connected_noodle(&mut gizmos, right_hip, right_knee, right_current, color, scale);
+    }
+}
+
+// --- SEVEN SEGMENT PROCEDURAL DIGITAL INDICATORS ---
+fn draw_digital_digit(
+    gizmos: &mut Gizmos,
+    pos: Vec2,
+    aim_dir: Vec2,
+    up_normal: Vec2,
+    digit: u32,
+    color: Color,
+    scale: f32,
+) {
+    let w = 6.0 * scale;
+    let h = 10.0 * scale;
+    let right_vec = aim_dir * w;
+    let up_vec = up_normal * h;
+
+    let bottom_left = pos - right_vec * 0.5;
+    let bottom_right = pos + right_vec * 0.5;
+    let mid_left = bottom_left + up_vec * 0.5;
+    let mid_right = bottom_right + up_vec * 0.5;
+    let top_left = bottom_left + up_vec;
+    let top_right = bottom_right + up_vec;
+
+    let draw_seg = |gizmos: &mut Gizmos, p1: Vec2, p2: Vec2| {
+        gizmos.line_2d(p1, p2, color);
+        gizmos.line_2d(p1 + up_normal * (0.5 * scale), p2 + up_normal * (0.5 * scale), color);
+    };
+
+    let segs = match digit {
+        0 => [true, true, true, true, true, true, false],
+        1 => [false, true, true, false, false, false, false],
+        2 => [true, true, false, true, true, false, true],
+        3 => [true, true, true, true, false, false, true],
+        4 => [false, true, true, false, false, true, true],
+        5 => [true, false, true, true, false, true, true],
+        6 => [true, false, true, true, true, true, true],
+        7 => [true, true, true, false, false, false, false],
+        8 => [true, true, true, true, true, true, true],
+        9 => [true, true, true, true, false, true, true],
+        _ => [false; 7],
+    };
+
+    if segs[0] { draw_seg(gizmos, top_left, top_right); }
+    if segs[1] { draw_seg(gizmos, top_right, mid_right); }
+    if segs[2] { draw_seg(gizmos, mid_right, bottom_right); }
+    if segs[3] { draw_seg(gizmos, bottom_right, bottom_left); }
+    if segs[4] { draw_seg(gizmos, bottom_left, mid_left); }
+    if segs[5] { draw_seg(gizmos, mid_left, top_left); }
+    if segs[6] { draw_seg(gizmos, mid_left, mid_right); }
+}
+
+fn draw_digital_number(
+    gizmos: &mut Gizmos,
+    pos: Vec2,
+    aim_dir: Vec2,
+    up_normal: Vec2,
+    number: u32,
+    color: Color,
+    scale: f32,
+) {
+    let s = number.to_string();
+    let char_width = 8.0 * scale;
+    let char_spacing = 3.0 * scale;
+    let total_chars = s.len() as f32;
+    let total_width = total_chars * char_width + (total_chars - 1.0) * char_spacing;
+    
+    let mut current_pos = pos - aim_dir * (total_width * 0.5 - char_width * 0.5);
+
+    for c in s.chars() {
+        if let Some(digit) = c.to_digit(10) {
+            draw_digital_digit(gizmos, current_pos, aim_dir, up_normal, digit, color, scale);
+        }
+        current_pos += aim_dir * (char_width + char_spacing);
     }
 }
 
 /// Solves the weapon arms, aiming a gun with the dominant hand, and holding a floating white shield/orb with the supporting hand.
 pub fn draw_procedural_arms(
     mut gizmos: Gizmos,
-    query: Query<(&Transform, &PlayerAim, &Player)>,
+    settings: Res<PhysicsSettings>,
+    query: Query<(&Transform, &PlayerAim, &Player, &Weapon)>,
 ) {
-    for (transform, aim, player) in query.iter() {
+    let scale = settings.player_scale;
+    for (transform, aim, player, weapon) in query.iter() {
         let body_pos = transform.translation.xy();
-        let visual_center = body_pos + Vec2::new(0.0, 25.0);
+        let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
         let aim_dir = aim.direction;
         
         // Arm colors
@@ -214,29 +298,71 @@ pub fn draw_procedural_arms(
         };
         
         // --- 1. WEAPON & DOMINANT ARM (AIMING SIDE) ---
-        let gun_center = visual_center + aim_dir * 66.0;
+        let gun_center = visual_center + aim_dir * (78.0 * scale);
         let normal = Vec2::new(-aim_dir.y, aim_dir.x); // perpendicular normal vector
         
         // Draw elegant minimal weapon shapes
-        let barrel_start = visual_center + aim_dir * 52.0;
-        let barrel_end = visual_center + aim_dir * 84.0;
+        let barrel_start = visual_center + aim_dir * (62.0 * scale);
+        let barrel_end = visual_center + aim_dir * (98.0 * scale);
         gizmos.line_2d(barrel_start, barrel_end, Color::srgb(0.75, 0.75, 0.75));
         
         // Flip the gun stock handle dynamically so it always points downwards (gravity-upright)
         let grip_sign = if aim_dir.x >= 0.0 { -1.0 } else { 1.0 };
-        let stock_end = barrel_start + normal * (grip_sign * 12.0);
+        let stock_end = barrel_start + normal * (grip_sign * 12.0 * scale);
         gizmos.line_2d(barrel_start, stock_end, Color::srgb(0.55, 0.55, 0.55));
         
         // Dominant hand anchor holding the gun stock
-        let dominant_hand = gun_center + normal * (grip_sign * 2.0);
+        let dominant_hand = gun_center + normal * (grip_sign * 2.0 * scale);
+        
+        // --- 1.5 AMMO INDICATORS & RELOAD GAUGES ABOVE WEAPON BARREL ---
+        let up_normal = -normal * grip_sign;
+        let ammo_base = barrel_start.lerp(barrel_end, 0.4) + up_normal * (12.0 * scale);
+
+        if weapon.reload_timer > 0.0 {
+            // Spinning reload indicator
+            let reload_center = barrel_start.lerp(barrel_end, 0.4) + up_normal * (14.0 * scale);
+            let ring_radius = 6.0 * scale;
+            gizmos.circle_2d(reload_center, ring_radius, Color::srgb(0.6, 0.6, 0.6));
+            
+            let reload_pct = weapon.reload_timer / weapon.reload_time;
+            let angle = reload_pct * std::f32::consts::TAU * 3.0; // Spin rapidly
+            let dot_pos = reload_center + Vec2::new(angle.cos(), angle.sin()) * ring_radius;
+            gizmos.circle_2d(dot_pos, 2.0 * scale, Color::srgb(1.0, 1.0, 1.0));
+        } else if weapon.current_ammo > 18 {
+            // Large ammo count bold dynamic digital 7-segment indicator
+            // Flip the text horizontally when aiming left so it reads left-to-right, but keep up_normal pointing UP so it is upright!
+            let text_dir = if aim_dir.x >= 0.0 { aim_dir } else { -aim_dir };
+            draw_digital_number(&mut gizmos, ammo_base, text_dir, up_normal, weapon.current_ammo, Color::srgb(1.0, 1.0, 1.0), scale);
+        } else if weapon.current_ammo > 0 {
+            // Stacked rows of 3 ammo indicators - perfectly balanced size and spacing!
+            let dot_spacing_col = 10.5 * scale;
+            let dot_spacing_row = 9.5 * scale;
+            let dot_radius = 2.4 * scale;
+            
+            for i in 0..weapon.current_ammo {
+                let row = i / 3;
+                let col = i % 3;
+                
+                let col_offset = (col as f32 - 1.0) * dot_spacing_col;
+                let row_offset = (row as f32) * dot_spacing_row;
+                
+                let dot_pos = ammo_base 
+                    + aim_dir * col_offset 
+                    + up_normal * row_offset;
+                
+                gizmos.circle_2d(dot_pos, dot_radius, Color::srgb(1.0, 1.0, 1.0));
+                gizmos.circle_2d(dot_pos, dot_radius - 0.9 * scale, Color::srgb(1.0, 1.0, 1.0));
+            }
+        }
         
         // --- 2. FLOATING WHITE ORB & SUPPORTING ARM (OPPOSITE SIDE) ---
         // Make the orb stay horizontally fixed on the opposite side instead of rotating with the aim vector!
-        let shield_offset_x = if aim_dir.x >= 0.0 { -38.0 } else { 38.0 };
+        let shield_offset_x = if aim_dir.x >= 0.0 { -52.0 * scale } else { 52.0 * scale };
         let shield_center = visual_center + Vec2::new(shield_offset_x, 0.0);
         
         // Draw solid floating white circle opposite to aim direction
-        for r in 0..=10 {
+        let max_r = (10.0 * scale).round() as i32;
+        for r in 0..=max_r {
             gizmos.circle_2d(shield_center, r as f32, Color::srgb(1.0, 1.0, 1.0));
         }
         
@@ -244,41 +370,43 @@ pub fn draw_procedural_arms(
         let supporting_hand = shield_center;
         
         // --- 3. SHOULDER & INVERSE KINEMATICS ---
-        let left_shoulder = visual_center + Vec2::new(-20.0, 0.0);
-        let right_shoulder = visual_center + Vec2::new(20.0, 0.0);
+        let left_shoulder = visual_center + Vec2::new(-20.0 * scale, 0.0);
+        let right_shoulder = visual_center + Vec2::new(20.0 * scale, 0.0);
         
-        let arm_l1 = 34.0;
-        let arm_l2 = 30.0;
+        let arm_l1 = 40.0 * scale;
+        let arm_l2 = 36.0 * scale;
         
         // Draw Dominant Hand Arm (Aim Side - swaps between left/right automatically)
         let dom_shoulder = if aim_dir.x >= 0.0 { right_shoulder } else { left_shoulder };
         let dom_elbow = solve_ik_2d(dom_shoulder, dominant_hand, arm_l1, arm_l2, aim_dir.x < 0.0);
-        draw_connected_noodle(&mut gizmos, dom_shoulder, dom_elbow, dominant_hand, color);
+        draw_connected_noodle(&mut gizmos, dom_shoulder, dom_elbow, dominant_hand, color, scale);
         
         // Draw Supporting Hand Arm (Opposite Floating Orb Side - swaps between left/right automatically)
         let sup_shoulder = if aim_dir.x >= 0.0 { left_shoulder } else { right_shoulder };
         let sup_elbow = solve_ik_2d(sup_shoulder, supporting_hand, arm_l1, arm_l2, aim_dir.x >= 0.0);
-        draw_connected_noodle(&mut gizmos, sup_shoulder, sup_elbow, supporting_hand, color);
+        draw_connected_noodle(&mut gizmos, sup_shoulder, sup_elbow, supporting_hand, color, scale);
     }
 }
 
 /// Dynamically renders black pixel cartoon eyes and tilting eyebrows that express emotions based on stats.
 pub fn draw_expressive_faces(
     mut gizmos: Gizmos,
+    settings: Res<PhysicsSettings>,
     query: Query<(&Transform, &PlayerAim, &Health, &Velocity, &Grounded, &WallContact)>,
 ) {
+    let scale = settings.player_scale;
     for (transform, aim, health, velocity, grounded, wall) in query.iter() {
         let body_pos = transform.translation.xy();
-        let visual_center = body_pos + Vec2::new(0.0, 25.0);
+        let visual_center = body_pos + Vec2::new(0.0, 25.0 * scale);
         let aim_dir = aim.direction;
         let hp_pct = health.current / health.max;
         let speed = velocity.0.length();
         
         // Offset face forward in direction of aim, and offset vertically slightly
-        let face_center = visual_center + aim_dir * 18.0 + Vec2::new(0.0, 3.0);
+        let face_center = visual_center + aim_dir * (18.0 * scale) + Vec2::new(0.0, 3.0 * scale);
         
         // Force facial features to stay horizontal and upright (side-by-side) regardless of aiming angles!
-        let eye_spacing = 11.0;
+        let eye_spacing = 11.0 * scale;
         let left_eye = face_center - Vec2::new(eye_spacing, 0.0);
         let right_eye = face_center + Vec2::new(eye_spacing, 0.0);
         
@@ -289,18 +417,18 @@ pub fn draw_expressive_faces(
         let color = Color::srgb(0.05, 0.05, 0.05); // Pure black eyes
         
         // Render Eyes
-        draw_eye(&mut gizmos, left_eye, is_panicked, is_angry, color);
-        draw_eye(&mut gizmos, right_eye, is_panicked, is_angry, color);
+        draw_eye(&mut gizmos, left_eye, is_panicked, is_angry, color, scale);
+        draw_eye(&mut gizmos, right_eye, is_panicked, is_angry, color, scale);
         
         // Render Eyebrows
-        draw_eyebrow(&mut gizmos, left_eye, true, is_panicked, is_angry, color);
-        draw_eyebrow(&mut gizmos, right_eye, false, is_panicked, is_angry, color);
+        draw_eyebrow(&mut gizmos, left_eye, true, is_panicked, is_angry, color, scale);
+        draw_eyebrow(&mut gizmos, right_eye, false, is_panicked, is_angry, color, scale);
         
         // Render Cyan Tears if player has critically low health (< 40%)
         if hp_pct < 0.4 {
             let tear_color = Color::srgb(0.2, 0.65, 0.95);
-            gizmos.line_2d(left_eye - Vec2::new(0.0, 4.0), left_eye - Vec2::new(0.0, 20.0), tear_color);
-            gizmos.line_2d(right_eye - Vec2::new(0.0, 4.0), right_eye - Vec2::new(0.0, 20.0), tear_color);
+            gizmos.line_2d(left_eye - Vec2::new(0.0, 4.0 * scale), left_eye - Vec2::new(0.0, 20.0 * scale), tear_color);
+            gizmos.line_2d(right_eye - Vec2::new(0.0, 4.0 * scale), right_eye - Vec2::new(0.0, 20.0 * scale), tear_color);
         }
     }
 }
@@ -338,13 +466,13 @@ pub fn solve_ik_2d(start: Vec2, target: Vec2, l1: f32, l2: f32, flip: bool) -> V
 }
 
 /// Translates foot states into real-time horizontal and vertical positions.
-fn get_foot_pos(state: FootState) -> Vec2 {
+fn get_foot_pos(state: FootState, scale: f32) -> Vec2 {
     match state {
         FootState::Planted { position } => position,
         FootState::Stepping { start, target, progress } => {
             let t = progress.clamp(0.0, 1.0);
             let horizontal = start.lerp(target, t);
-            let arc_height = 20.0 * (4.0 * t * (1.0 - t)); // parabolic lift arc
+            let arc_height = 20.0 * scale * (4.0 * t * (1.0 - t)); // parabolic lift arc
             horizontal + Vec2::new(0.0, arc_height)
         }
         FootState::Airborne { current } => current,
@@ -362,6 +490,7 @@ fn process_foot(
     cooldown: &mut f32,
     side_offset: f32,
     ground_y: f32,
+    scale: f32,
 ) -> FootState {
     if !grounded {
         // Airborne trailing dangling leg physics
@@ -375,9 +504,9 @@ fn process_foot(
         };
         
         let target_offset = Vec2::new(
-            side_offset - velocity.x * 0.015, // gravity effect: stay more directly under player when moving horizontally
-            -45.0 - velocity.y * 0.01,        // reduced elasticity: stretch less when jumping or falling
-        ).clamp_length_max(48.0);             // keep target well within physical reach to preserve organic bend
+            side_offset - velocity.x * 0.005, // gravity effect: stay more directly under player when moving horizontally
+            -38.0 * scale - velocity.y * 0.002,       // reduced elasticity: stretch less when jumping or falling
+        ).clamp_length_max(42.0 * scale);             // keep target well within physical reach to preserve organic bend
         let target_pos = hip_pos + target_offset;
         
         let new_pos = current_pos + (target_pos - current_pos) * dt * 10.0;
@@ -391,7 +520,7 @@ fn process_foot(
         }
         FootState::Planted { position } => {
             let dist_h = hip_pos.x - position.x;
-            let max_stride = 50.0;
+            let max_stride = 50.0 * scale;
             let other_is_stepping = matches!(other_foot_state, FootState::Stepping { .. });
             
             if dist_h.abs() > max_stride && !other_is_stepping && *cooldown <= 0.0 {
@@ -428,6 +557,7 @@ fn draw_connected_noodle(
     joint: Vec2,
     target: Vec2,
     color: Color,
+    scale: f32,
 ) {
     let segments = 6;
     for i in 0..segments {
@@ -439,8 +569,8 @@ fn draw_connected_noodle(
         
         // Draw 3 closely-spaced lines parallel to achieve thickness!
         gizmos.line_2d(p1, p2, color);
-        gizmos.line_2d(p1 + Vec2::new(1.0, 0.0), p2 + Vec2::new(1.0, 0.0), color);
-        gizmos.line_2d(p1 + Vec2::new(-1.0, 0.0), p2 + Vec2::new(-1.0, 0.0), color);
+        gizmos.line_2d(p1 + Vec2::new(1.0, 0.0) * scale, p2 + Vec2::new(1.0, 0.0) * scale, color);
+        gizmos.line_2d(p1 + Vec2::new(-1.0, 0.0) * scale, p2 + Vec2::new(-1.0, 0.0) * scale, color);
     }
 }
 
@@ -451,20 +581,26 @@ fn draw_eye(
     panicked: bool,
     angry: bool,
     color: Color,
+    scale: f32,
 ) {
-    let mut height = 8.0;
-    let mut width = 3.0;
+    let mut height = 8.0 * scale;
+    let mut width = 3.0 * scale;
     
     if panicked {
-        height = 14.0;
-        width = 4.0;
+        height = 14.0 * scale;
+        width = 4.0 * scale;
     } else if angry {
-        height = 4.0;
-        width = 4.0;
+        height = 4.0 * scale;
+        width = 4.0 * scale;
     }
     
-    for w in 0..(width as i32) {
-        let offset_x = (w as f32) - (width / 2.0);
+    let steps = (width.round() as i32).max(1);
+    for w in 0..steps {
+        let offset_x = if steps > 1 {
+            (w as f32 / (steps - 1) as f32 - 0.5) * width
+        } else {
+            0.0
+        };
         gizmos.line_2d(
             center + Vec2::new(offset_x, -height / 2.0),
             center + Vec2::new(offset_x, height / 2.0),
@@ -481,20 +617,21 @@ fn draw_eyebrow(
     panicked: bool,
     angry: bool,
     color: Color,
+    scale: f32,
 ) {
-    let brow_center = eye_center + Vec2::new(0.0, 8.0);
-    let half_width = 5.0;
+    let brow_center = eye_center + Vec2::new(0.0, 8.0 * scale);
+    let half_width = 5.0 * scale;
     
     let mut tilt = 0.0;
     if angry {
-        tilt = if is_left { -3.5 } else { 3.5 };
+        tilt = if is_left { -3.5 * scale } else { 3.5 * scale };
     } else if panicked {
-        tilt = if is_left { 3.5 } else { -3.5 };
+        tilt = if is_left { 3.5 * scale } else { -3.5 * scale };
     }
     
     let start = brow_center + Vec2::new(-half_width, -tilt);
     let end = brow_center + Vec2::new(half_width, tilt);
     
     gizmos.line_2d(start, end, color);
-    gizmos.line_2d(start + Vec2::new(0.0, 1.0), end + Vec2::new(0.0, 1.0), color);
+    gizmos.line_2d(start + Vec2::new(0.0, 1.0 * scale), end + Vec2::new(0.0, 1.0 * scale), color);
 }

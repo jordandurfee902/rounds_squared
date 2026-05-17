@@ -1,20 +1,21 @@
 use bevy::prelude::*;
 use crate::physics::*;
-
+use crate::physics::weapon::Weapon;
+use crate::settings::{PhysicsSettings, PersistentPlayerStats, GameState};
 
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_players)
+        app.add_systems(OnEnter(GameState::Gameplay), spawn_players)
            .add_systems(Update, (
                player_input.before(crate::physics::forces::apply_gravity_and_movement),
                draw_health_bars,
-           ));
+           ).run_if(in_state(GameState::Gameplay)));
     }
 }
 
-#[derive(Component, PartialEq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Player {
     P1,
     P2,
@@ -26,15 +27,30 @@ pub struct Health {
     pub max: f32,
 }
 
-fn spawn_players(
+#[derive(Component, Debug, Clone)]
+pub struct PlayerStatsComponent {
+    pub movement_speed: f32,
+    pub jump_force: f32,
+    pub player_scale: f32,
+    pub health_max: f32,
+}
+
+pub fn spawn_players(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    persistent_stats: Res<PersistentPlayerStats>,
 ) {
+    let p1_stats = &persistent_stats.p1;
+    let p2_stats = &persistent_stats.p2;
+
+    let p1_scale = p1_stats.player_scale;
+    let p2_scale = p2_stats.player_scale;
+
     // Player 1 (Blue) - Base mass = 1.0 (Normal)
     commands.spawn((
         Player::P1,
-        Collider::Circle { radius: 40.0 },
+        Collider::Circle { radius: 40.0 * p1_scale },
         Transform::from_xyz(-1350.0, 100.0, 10.0),
         GlobalTransform::default(),
         Visibility::default(),
@@ -46,22 +62,37 @@ fn spawn_players(
     )).insert((
         ControllerInput::default(),
         Mass(1.0),
-        Health { current: 100.0, max: 100.0 },
+        Health { current: p1_stats.health_max, max: p1_stats.health_max },
         PlayerAim::default(),
         ProceduralLimbs::default(),
+        PlayerStatsComponent {
+            movement_speed: p1_stats.movement_speed,
+            jump_force: p1_stats.jump_force,
+            player_scale: p1_stats.player_scale,
+            health_max: p1_stats.health_max,
+        },
+        Weapon {
+            max_ammo: p1_stats.max_ammo,
+            current_ammo: p1_stats.max_ammo,
+            fire_cooldown: 0.0,
+            fire_rate: p1_stats.fire_rate,
+            reload_timer: 0.0,
+            reload_time: p1_stats.reload_time,
+            time_since_last_shot: 0.0,
+        },
     )).with_children(|parent| {
         // Spawn visual body offset upwards by 25px to float perfectly on legs!
         parent.spawn((
-            Mesh2d(meshes.add(Circle::new(40.0))),
+            Mesh2d(meshes.add(Circle::new(40.0 * p1_scale))),
             MeshMaterial2d(materials.add(Color::srgb(0.2, 0.5, 1.0))),
-            Transform::from_xyz(0.0, 25.0, 0.0),
+            Transform::from_xyz(0.0, 25.0 * p1_scale, 0.0),
         ));
     });
 
     // Player 2 (Orange) - Base mass = 1.0 (Identical start-of-game balance)
     commands.spawn((
         Player::P2,
-        Collider::Circle { radius: 40.0 },
+        Collider::Circle { radius: 40.0 * p2_scale },
         Transform::from_xyz(1350.0, 100.0, 10.0),
         GlobalTransform::default(),
         Visibility::default(),
@@ -73,15 +104,30 @@ fn spawn_players(
     )).insert((
         ControllerInput::default(),
         Mass(1.0),
-        Health { current: 100.0, max: 100.0 },
+        Health { current: p2_stats.health_max, max: p2_stats.health_max },
         PlayerAim::default(),
         ProceduralLimbs::default(),
+        PlayerStatsComponent {
+            movement_speed: p2_stats.movement_speed,
+            jump_force: p2_stats.jump_force,
+            player_scale: p2_stats.player_scale,
+            health_max: p2_stats.health_max,
+        },
+        Weapon {
+            max_ammo: p2_stats.max_ammo,
+            current_ammo: p2_stats.max_ammo,
+            fire_cooldown: 0.0,
+            fire_rate: p2_stats.fire_rate,
+            reload_timer: 0.0,
+            reload_time: p2_stats.reload_time,
+            time_since_last_shot: 0.0,
+        },
     )).with_children(|parent| {
         // Spawn visual body offset upwards by 25px to float perfectly on legs!
         parent.spawn((
-            Mesh2d(meshes.add(Circle::new(40.0))),
+            Mesh2d(meshes.add(Circle::new(40.0 * p2_scale))),
             MeshMaterial2d(materials.add(Color::srgb(1.0, 0.5, 0.2))),
-            Transform::from_xyz(0.0, 25.0, 0.0),
+            Transform::from_xyz(0.0, 25.0 * p2_scale, 0.0),
         ));
     });
 }
@@ -144,14 +190,16 @@ fn draw_filled_rect(
 
 fn draw_health_bars(
     mut gizmos: Gizmos,
+    settings: Res<PhysicsSettings>,
     query: Query<(&Transform, &Health, &Player)>,
 ) {
+    let scale = settings.player_scale;
     for (transform, health, player) in query.iter() {
         let player_pos = transform.translation.xy();
         // Position the health bar about 90 pixels above the parent physical center (65px above visual floating body)
-        let bar_center = player_pos + Vec2::new(0.0, 90.0);
-        let bar_width = 64.0;
-        let bar_height = 6.0;
+        let bar_center = player_pos + Vec2::new(0.0, 90.0 * scale);
+        let bar_width = 64.0 * scale;
+        let bar_height = 6.0 * scale;
 
         // 1. Draw solid outer boundary / background bar (dark solid)
         draw_filled_rect(

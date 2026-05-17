@@ -1,15 +1,44 @@
 {
-    "gravity": -1600.0,
-    "player_speed": 600.0,
-    "player_accel": 10.0,
-    "player_jump_force": 800.0,
-    "boundary_restitution": 0.0,
-    "player_restitution": 0.5,
-    "air_friction": 1.0,
-    "ground_friction": 1.0,
-    "movement_stop_friction": 10.0,
-    "wall_slide_speed": 150.0,
-    "wall_jump_push_force": 800.0,
-    "fast_fall_acceleration": 4000.0,
-    "air_accel": 25.0
+    "physics": {
+        "gravity": -1600.0,
+        "player_speed": 600.0,
+        "player_accel": 10.0,
+        "player_jump_force": 800.0,
+        "boundary_restitution": 0.0,
+        "player_restitution": 0.5,
+        "air_friction": 1.0,
+        "ground_friction": 1.0,
+        "movement_stop_friction": 10.0,
+        "wall_slide_speed": 150.0,
+        "wall_jump_push_force": 800.0,
+        "fast_fall_acceleration": 4000.0,
+        "air_accel": 25.0,
+        "player_scale": 1.50
+    },
+    "p1_weapon": {
+        "bullet_range": 2.2,
+        "bullet_speed": 1000.0,
+        "bullet_gravity": -600.0,
+        "bullet_damage": 12.0,
+        "bullet_size_mult": 1.1,
+        "bullet_growth": 10.0,
+        "max_ammo": 6,
+        "reload_time": 1.2,
+        "fire_rate": 0.35,
+        "special_effects": [
+            "PoisonCloud"
+        ]
+    },
+    "p2_weapon": {
+        "bullet_range": 2.0,
+        "bullet_speed": 1350.0,
+        "bullet_gravity": 0.0,
+        "bullet_damage": 18.0,
+        "bullet_size_mult": 0.8,
+        "bullet_growth": 0.0,
+        "max_ammo": 20,
+        "reload_time": 1.0,
+        "fire_rate": 0.15,
+        "special_effects": []
+    }
 }

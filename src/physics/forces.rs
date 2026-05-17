@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use crate::settings::PhysicsSettings;
 use super::components::*;
+use crate::player::PlayerStatsComponent;
 
 pub fn apply_gravity_and_movement(
     time: Res<Time>,
@@ -39,11 +40,11 @@ pub fn apply_gravity_and_movement(
 pub fn player_movement(
     time: Res<Time>,
     settings: Res<PhysicsSettings>,
-    mut query: Query<(&mut Velocity, &Grounded, &WallContact, &ControllerInput)>,
+    mut query: Query<(&mut Velocity, &Grounded, &WallContact, &ControllerInput, &PlayerStatsComponent)>,
 ) {
     let dt = time.delta_secs();
-    for (mut velocity, grounded, wall, input) in query.iter_mut() {
-        let target_speed = input.move_dir * settings.player_speed;
+    for (mut velocity, grounded, wall, input, stats) in query.iter_mut() {
+        let target_speed = input.move_dir * stats.movement_speed;
 
         // Ground Movement vs Air Strafing
         if grounded.0 {
@@ -68,14 +69,14 @@ pub fn player_movement(
         if input.jump {
             if grounded.0 {
                 // Normal Jump: momentum carries over from ground movement
-                velocity.0 = calculate_jump(velocity.0, settings.player_jump_force);
+                velocity.0 = calculate_jump(velocity.0, stats.jump_force);
             } else if wall.left {
                 // Wall Leap off left wall: push up and outward to the right
-                velocity.0.y = settings.player_jump_force;
+                velocity.0.y = stats.jump_force;
                 velocity.0.x = settings.wall_jump_push_force;
             } else if wall.right {
                 // Wall Leap off right wall: push up and outward to the left
-                velocity.0.y = settings.player_jump_force;
+                velocity.0.y = stats.jump_force;
                 velocity.0.x = -settings.wall_jump_push_force;
             }
         }
