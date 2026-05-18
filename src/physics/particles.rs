@@ -19,6 +19,13 @@ pub struct Particle {
     pub particle_type: ParticleType,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct ExplosionRecordComponent {
+    pub pos: Vec2,
+    pub color: Color,
+    pub damage: f32,
+}
+
 // --- COLOR TEMPERATURE SHIFTING HELPER ---
 pub fn get_tiered_color(base_color: Color, damage: f32) -> Color {
     if damage < 25.0 {
@@ -171,6 +178,7 @@ pub fn spawn_spark_burst(
             Transform::from_xyz(pos.x, pos.y, 8.0),
         ));
     }
+    commands.spawn(ExplosionRecordComponent { pos, color, damage: -1.0 });
 }
 
 // --- DYNAMIC TRAILS SPAWNER (SCALES BY TIRED DAMAGE COLOR, TEARDROP FOR METEOR) ---
@@ -375,7 +383,7 @@ pub fn spawn_damage_explosion(
 
         let lifetime = rng.range(0.14, 0.24);
 
-        commands.spawn((
+         commands.spawn((
             Particle {
                 velocity: Vec2::ZERO, // Shockwave is fixed at impact point
                 color: final_color,
@@ -387,4 +395,5 @@ pub fn spawn_damage_explosion(
             Transform::from_xyz(pos.x, pos.y, 8.0),
         ));
     }
+    commands.spawn(ExplosionRecordComponent { pos, color: final_color, damage });
 }

@@ -13,8 +13,6 @@ use player::*;
 use graphics::*;
 use settings::*;
 use map::*;
-use bevy_ggrs::RollbackApp;
-
 fn main() {
     #[cfg(target_os = "windows")]
     unsafe {
@@ -32,36 +30,13 @@ fn main() {
             ..default()
         }))
         .add_plugins((SettingsPlugin, PhysicsPlugin, PlayerPlugin, GraphicsPlugin, MapPlugin))
-        .add_plugins(bevy_ggrs::GgrsPlugin::<net::GgrsConfig>::default())
         .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.05)))
         .insert_resource(net::IsNetworked(false))
         .insert_resource(net::LocalPlayerIndex(0))
-        .insert_resource(net::RollbackRng::new(12345))
+        .insert_resource(net::RollbackRng::new(98765))
         .add_systems(Startup, (setup_camera, maximize_window))
         .add_systems(OnEnter(GameState::Matchmaking), net::start_matchmaking)
         .add_systems(Update, net::lobby_system.run_if(in_state(GameState::Matchmaking)))
-        .rollback_component_with_copy::<Transform>()
-        .rollback_component_with_copy::<Velocity>()
-        .rollback_component_with_copy::<Acceleration>()
-        .rollback_component_with_copy::<Mass>()
-        .rollback_component_with_copy::<Friction>()
-        .rollback_component_with_copy::<Restitution>()
-        .rollback_component_with_copy::<Grounded>()
-        .rollback_component_with_copy::<WallContact>()
-        .rollback_component_with_copy::<ControllerInput>()
-        .rollback_component_with_copy::<JumpAllowance>()
-        .rollback_component_with_copy::<Health>()
-        .rollback_component_with_copy::<PlayerStatsComponent>()
-        .rollback_component_with_copy::<BlockComponent>()
-        .rollback_component_with_copy::<crate::physics::anim::PlayerAim>()
-        .rollback_component_with_clone::<crate::physics::weapon::Weapon>()
-        .rollback_component_with_clone::<crate::physics::weapon::Projectile>()
-        .rollback_resource_with_copy::<net::RollbackRng>()
-        .rollback_resource_with_copy::<crate::settings::ScoreTracker>()
-        .rollback_resource_with_copy::<crate::maps::ActiveMap>()
-        .rollback_resource_with_clone::<crate::settings::LobbySlots>()
-        .rollback_resource_with_clone::<crate::physics::card_selection::CardSelectionState>()
-        .rollback_resource_with_clone::<crate::settings::PersistentPlayerStats>()
         .run();
 }
 

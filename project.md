@@ -1,12 +1,12 @@
-# 🎮 Project Rules & Architecture Specification - Rounds Squared
+# 🎮 Project Rules & Architecture Specification - SETS
 
-This document serves as the absolute source of truth for the architecture, mechanics, mathematics, and operational rules of **Rounds Squared**, a fast-paced 2D local & online multiplayer arena shooter built using the **Bevy 0.18.1 (18.01)** framework.
+This document serves as the absolute source of truth for the architecture, mechanics, mathematics, and operational rules of **SETS**, a fast-paced 2D local & online multiplayer arena shooter built using the **Bevy 0.18.1 (18.01)** framework.
 
 ---
 
 ## 🏗️ Core Architecture & State Machine
 
-Rounds Squared operates on a strict double-state architecture managed by Bevy's `States` mechanism, which is synchronized across P2P players under rollback netcode:
+SETS operates on a strict double-state architecture managed by Bevy's `States` mechanism, which is synchronized across P2P players under rollback netcode:
 
 ```mermaid
 stateDiagram-v2
@@ -27,10 +27,28 @@ stateDiagram-v2
 
 ---
 
-## 🌐 GGRS P2P Rollback Multiplayer Architecture
+## 🌐 Authoritative Host-Client Multiplayer Architecture
 File: `src/net.rs`
 
-Rounds Squared uses high-performance peer-to-peer rollback netcode driven by `bevy_ggrs` (v0.20.0) and WebRTC `matchbox_socket` (v0.14.0). 
+SETS uses an **Authoritative Host-Client** network architecture designed to ensure zero physics desynchronizations. Instead of distributed simulation (Rollback/P2P), we designate the Host computer as the single source of truth, while the Client acts as a clean rendering terminal.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Host as Host Player (P1)
+    actor Client as Client Player (P2)
+    
+    Note over Host,Client: Matchmaking via Matchbox Signaling Server
+    Note over Host: Assigned Local Index 0 (Host)
+    Note over Client: Assigned Local Index 1 (Client)
+    
+    loop Every Frame (Gameplay Tick)
+        Client->>Host: ClientInputPacket (P2 Controls & Aim)
+        Note over Host: 1. Gathers Local Input (P1)<br/>2. Applies Client Input (P2)<br/>3. Simulates Authoritative Physics Loop<br/>4. Resolves AABB/Circle Collisions
+        Host->>Client: HostStatePacket (Synchronized Game State)
+        Note over Client: Overwrites Local Transforms, Velocities,<br/>Health, Ammo, Grounded, and Active Projectiles
+    end
+```
 
 ### 1. WebRTC Connection & Signaling Loop
 *   **Asynchronous Message Loop**: WebRTC socket signaling tasks run in the background on Bevy's multi-threaded `IoTaskPool`:
@@ -43,32 +61,85 @@ Rounds Squared uses high-performance peer-to-peer rollback netcode driven by `be
     ```
 *   **Deterministic Player Ordering**: Connections sort Peer IDs alphabetically to guarantee that both host and guest assign identical player index indices (consistently designating the Host as P1/Index 0 and the Guest as P2/Index 1).
 
-### 2. Rollback States & Snapshots
-GGRS manages speculative local frames by taking a complete snapshot of registered game state resources and components. If a packet is lost or delayed, the engine rolls the simulation back, overwrites the components with their last verified state, and re-simulates the ticks:
-*   **Rollback Components**: `Transform`, `Velocity`, `Acceleration`, `Mass`, `Friction`, `Restitution`, `Grounded`, `WallContact`, `ControllerInput`, `JumpAllowance`, `Health`, `PlayerStatsComponent`, `BlockComponent`, `PlayerAim`, `Weapon`, `Projectile`.
-*   **Rollback Resources**: `RollbackRng`, `ScoreTracker`, `ActiveMap`, `LobbySlots`, `CardSelectionState`, `PersistentPlayerStats`.
+### 2. Network State Replication & Serialization
+Instead of speculating on local frames, the network loop strictly synchronizes components every frame:
+*   **Client to Host (`ClientInputPacket`)**: Sends P2's moving directions, jumping states, fast fall triggers, weapon firings, block activations, manual reloads, aim direction vectors, card menu selections, and ready flags.
+*   **Host to Client (`HostStatePacket`)**: Sends the absolute frame count, lobby slots, current map index, card selection states (active index, selected index), player status (P1 and P2 positions, velocities, health, blocking timers, ammunition counts, reload progress, and grounded states), and dynamic arrays of all active projectile/particle locations.
+*   **Client Component Overwrites**: On receipt of `HostStatePacket`, the Client directly overwrites its local entities with Host positions and velocities. **The Client runs zero physics simulation queries locally**, completely eliminating desynchronization.
 
 ---
 
-## 🪲 Rollback Bugs Discovered & Prevention Rules
+## 🪲 Network & Visual Bugs Smashed
 
-During the engineering of the online network layer, we discovered and resolved critical desynchronization vulnerabilities. Below are the design patterns needed to prevent these bugs from ever reentering the codebase:
+During the engineering of the Host-Client online network layer, we encountered and successfully resolved several critical visual and synchronization bugs:
 
-### 1. The Ghost State Bug (Unregistered State)
-*   **The Bug**: Components (like `PlayerAim` and `Weapon`) or resources (like `CardSelectionState` and `ScoreTracker`) were mutated in GGRS loops but omitted from GGRS registration. When GGRS rolled back frames, these states did not rewind. Re-simulating frames mutated future values, causing ammo double-depletion, timer drifts, and round score mismatches.
-*   **Prevention Rule**: **Every** component, struct, or resource that is mutated inside a system registered under `GgrsSchedule` **must** be registered as a rollback target inside `main.rs` (using `.rollback_component_with_copy`, `.rollback_component_with_clone`, `.rollback_resource_with_copy`, or `.rollback_resource_with_clone`).
+### 1. Lobby Input Flashing & Device Setup
+*   **The Bug**: During device pairing, if a keyboard or controller was tapped, the selection page flashed repeatedly, resulting in corrupt characters rendering or gameplay input loops colliding.
+*   **Fix**: Completely separated device matchmaking hooks from active game input loops, enforcing a strict separation of setup screens and in-game controls.
 
-### 2. The Non-Deterministic Clock Drift (Universe Splitting)
-*   **The Bug**: Spawning levels or cosmetic particle velocities relied on standard system time (`SystemTime::now()`). Because milliseconds vary between computers, Client A selected one map index while Client B selected another, splitting the game into different universes.
-*   **Prevention Rule**: Never use system clocks or standard clocks inside rollback schedules. All RNG values must derive from a seed-synchronized GGRS resource (like our custom `RollbackRng`) registered with GGRS.
+### 2. Host Movement Freeze (Keyboard/Gamepad Lockout)
+*   **The Bug**: On the Host screen, Player 1 was frozen in place because local inputs were not correctly routed to P1's `ControllerInput` component.
+*   **Fix**: Added a localized hardware polling block inside `host_network_system` that reads keyboard bindings (`settings.json`), mouse buttons, and connected Gamepads, applying them directly to the Host's player entity.
 
-### 3. The Local Input Override (Aim Drift)
-*   **The Bug**: The aiming system updated all players using a `KeyboardMouse` slot based on the local mouse cursor coordinate. Moving the mouse on Client A forced both P1 and P2's aims to match Client A's mouse locally, immediately desynchronizing the network stream.
-*   **Prevention Rule**: Systems polling local hardware coordinates (like mouse position or screen clicks) must strictly query your `LocalPlayerIndex`. Remote player coordinates must only be populated by unpacking the synchronized network input packet.
+### 3. Client Leg Stretching (Grounded State Desync)
+*   **The Bug**: When jumping on the Client screen, the player's hips moved up, but their legs stretched infinitely and remained planted on the ground.
+*   **Cause**: The Client skipped the physics loop (where `Grounded` is computed). The leg Inverse Kinematics (IK) system permanently saw `Grounded = true`, keeping the feet glued to the floor.
+*   **Fix**: Added `grounded: bool` to the serialized `PlayerNetState` packet. The Host sends its authoritative `grounded` state every frame, which the Client directly overwrites. This lets the leg system smoothly transition into airborne trailing dangling leg physics on jumps!
 
-### 4. The Transition Input Leak (Overlapping Bitfields)
-*   **The Bug**: When one player died and transitioned to card selection while the other was still in gameplay, the gameplay inputs (such as "Joined/Ready" on Bit 5) were parsed as card menu commands ("Left Nav" on Bit 5), shifting the card selector index and causing a 2-card gap.
-*   **Prevention Rule**: Use a dedicated **State Handshake Flag (Bit 7)** inside input streams. Menu navigation must be ignored until the remote peer sends Bit 7 to verify they have formally loaded into the card selection menu.
+### 4. Overlapping "Spider Legs" & Center Orange Circle (Lingering Exit Sweep)
+*   **The Bug**: During round transitions, Client screens showed Player 2's body drawing in the center (orange circle). On subsequent rounds, the Client gave players multiple sets of overlapping spider legs that flailed independently.
+*   **Cause**: Projectiles, particles, and players were not despawned when transitioning to Card Selection, causing old visual assets to drift to `(0,0)` and new player entities to stack on top of old ones.
+*   **Fix**: Implemented a comprehensive `despawn_gameplay_entities` system triggered on `OnExit(GameState::Gameplay)`. This cleanly sweeps and despawns all lingering players, bullets, and particles on round completion.
+
+### 5. Invisible Projectiles on Client (Visual/Physics Separation)
+*   **The Bug**: Projectiles did not render at all on the Client screen, making bullets completely invisible.
+*   **Cause**: Bullet line/meteor rendering, poison green clouds, and trail spark spawning were embedded inside `projectile_physics_system`, which the Client skips entirely.
+*   **Fix**: Extracted all visual rendering and spark spawning into a lightweight, standalone `draw_projectiles` system, scheduling it in the global `Update` loop to run on **both** Host and Client.
+
+### 6. Host Leg Sliding (Visual System Scheduling)
+*   **The Bug**: The Client's walking animations looked perfect, but the Host's local characters slid around without animating their legs.
+*   **Cause**: At the start of the physics block, `reset_collision_states` resets `Grounded` to `false` before `player_platform_collision` resolves it to `true`. Without explicit ordering, Bevy scheduled the visual `update_and_draw_legs` system to run *after* the reset but *before* the platform check, making the player look airborne every frame.
+*   **Fix**: Ordered the entire noodle-drawing visual block to run explicitly `.after(player_platform_collision)`. This ensures that visual animations only resolve once grounding states are stable for the current frame.
+
+---
+
+## 🛠️ Guidelines for Implementing Multiplayer Compatible Features
+
+To maintain 100% network synchronization and prevent desyncs when implementing future gameplay features, cards, or custom visual elements, follow these strict architectural rules:
+
+### 1. The Authoritative Rule: "Host Simulates, Client Renders"
+*   **Physics, Health, & Collisions**: Any code that changes player positions, applies forces, reduces health, updates ammo, handles cooldowns, or registers blocking **must run only on the Host** (guaranteed by the `.run_if(run_physics_simulation)` condition in `src/physics/mod.rs`).
+*   **Visuals & Visual FX**: Any code that draws lines (`gizmos`), plays sounds, spawns purely cosmetic client-side particles, or triggers UI overlays **must run on both Host and Client** (scheduled under `Update` without physics-simulation locks).
+
+### 2. How to Add a New Player Stat or Component (e.g. Shield Capacity, Speed Buff)
+If you add a new component that affects gameplay:
+1.  **Add to Packet**: Add the new data field (e.g. `shield_charge: f32`) to the `PlayerNetState` struct inside `src/net.rs`.
+2.  **Host Packages It**: In `host_network_system`, extract the player's component value and populate it in `PlayerNetState`.
+    ```rust
+    // In host_network_system:
+    let p_state = PlayerNetState {
+        // ... existing fields ...
+        shield_charge: player_shield.charge,
+    };
+    ```
+3.  **Client Overwrites It**: In `client_network_system`, unpack the field and assign it directly to the local player entity.
+    ```rust
+    // In client_network_system:
+    if let Some(ref mut local_shield) = player_shield {
+        local_shield.charge = p_state.shield_charge;
+    }
+    ```
+
+### 3. How to Spawn New Entities (e.g. Drones, Traps, Custom Projectiles)
+Clients must **never** spawn gameplay-active entities locally. Doing so splits the physical world:
+1.  **Host Spawns Authoritatively**: The Host spawns the entity with physical coordinates, velocities, and identifiers.
+2.  **Serialize inside State**: Include an array or list of these entities inside `HostStatePacket` (e.g. `pub traps: Vec<TrapNetState>`).
+3.  **Client Spawns Dummy/Visual Counterparts**: The Client reads the list, compares it to local dummy entities, spawns corresponding visual entities if new, updates positions of existing ones, and despawns any that are no longer present in the packet. (Refer to how `Projectile` arrays are synced in `src/net.rs`).
+
+### 4. Deterministic RNG
+If a card or weapon uses random numbers (e.g., shotgun pellet spread, random bounce directions):
+*   Do **not** use `rand::thread_rng()` or standard clocks.
+*   **Use the `RollbackRng` resource** synced in the netcode layer. This ensures that random spreads resolve identically on both computers.
 
 ---
 
@@ -77,7 +148,7 @@ During the engineering of the online network layer, we discovered and resolved c
 ### 1. Custom 2D Collision & Border Physics Engine
 File: `src/physics/collision.rs` & `src/physics/forces.rs`
 
-Rounds Squared uses custom axis-aligned bounding box (AABB), circle-circle, and circle-box collision resolution logic instead of external physics libraries to ensure deterministic, snappy gameplay.
+SETS uses custom axis-aligned bounding box (AABB), circle-circle, and circle-box collision resolution logic instead of external physics libraries to ensure deterministic, snappy gameplay.
 
 #### **A. Boundary Hazards & Knockback Override**
 The outer viewport edges (`TARGET_WIDTH = 1920.0`, `TARGET_HEIGHT = 1080.0`) act as high-damage electric boundaries.

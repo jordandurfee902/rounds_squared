@@ -27,25 +27,8 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(lobby_ui::LobbyUiPlugin);
 
         // Core physics simulation & firing updates (suspended when paused)
-        // 1. Local play (NOT networked)
+        // Runs in Local Play OR on the Host (P1)
         app.add_systems(Update, (
-            apply_acceleration,
-            apply_gravity_and_movement,
-            player_movement,
-            apply_friction,
-            apply_velocity,
-            reset_collision_states,
-            boundary_collision,
-            player_collision,
-            player_platform_collision,
-            weapon::weapon_update_system,
-            weapon::weapon_fire_system,
-            weapon::projectile_physics_system,
-        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(resource_equals(crate::net::IsNetworked(false)))));
-
-        // 2. Online P2P play (GGRS rollback schedule)
-        app.add_systems(bevy_ggrs::GgrsSchedule, (
-            crate::net::unpack_network_inputs,
             apply_acceleration,
             apply_gravity_and_movement,
             player_movement,
@@ -60,22 +43,18 @@ impl Plugin for PhysicsPlugin {
             weapon::weapon_fire_system,
             weapon::projectile_physics_system,
             crate::physics::card_selection::check_player_death,
-        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused)));
+        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(run_physics_simulation)));
 
-        app.add_systems(bevy_ggrs::GgrsSchedule, (
-            crate::net::lobby_sync_network_system,
-        ).run_if(in_state(GameState::Lobby)).ambiguous_with_all());
+        // Network synchronization systems (run in all online states)
+        app.add_systems(Update, (
+            crate::net::host_network_system.run_if(resource_equals(crate::net::IsNetworked(true)).and(resource_equals(crate::net::LocalPlayerIndex(0)))),
+            crate::net::client_network_system.run_if(resource_equals(crate::net::IsNetworked(true)).and(resource_equals(crate::net::LocalPlayerIndex(1)))),
+        ));
 
-        app.add_systems(bevy_ggrs::GgrsSchedule, (
-            crate::net::card_selection_sync_network_system,
-        ).run_if(in_state(GameState::CardSelection)).ambiguous_with_all());
-
-        // Register GGRS input capture system
-        app.add_systems(bevy_ggrs::ReadInputs, crate::net::ggrs_input_system);
-
-        // 3. Purely visual particles (always in Update loop in both modes)
+        // 3. Purely visual particles & projectile rendering (always in Update loop in both modes)
         app.add_systems(Update, (
             particles::update_particles,
+            weapon::draw_projectiles,
         ).run_if(in_state(GameState::Gameplay).and(is_not_paused)));
 
         // Noodle drawing and visual systems (continue running while paused to draw visual frames)
@@ -84,7 +63,7 @@ impl Plugin for PhysicsPlugin {
             update_and_draw_legs,
             draw_procedural_arms,
             draw_expressive_faces,
-        ).chain().run_if(in_state(GameState::Gameplay)));
+        ).chain().after(player_platform_collision).run_if(in_state(GameState::Gameplay)));
 
         // Draw score UI overlay during all game states (Gameplay and Card Selection)
         app.add_systems(Update, draw_score_overlay);
@@ -128,4 +107,11 @@ pub fn is_not_paused(
     let p_ok = if let Some(p) = paused { !p.0 } else { true };
     let d_ok = if let Some(d) = delay { d.0 <= 0.0 } else { true };
     p_ok && d_ok
+}
+
+pub fn run_physics_simulation(
+    is_net: Res<crate::net::IsNetworked>,
+    local_idx: Res<crate::net::LocalPlayerIndex>,
+) -> bool {
+    !is_net.0 || local_idx.0 == 0
 }

@@ -9,6 +9,7 @@ dependencies = [
  "bevy",
  "bevy_ggrs",
  "bytemuck",
+ "js-sys",
  "matchbox_socket",
  "serde",
  "serde_json",

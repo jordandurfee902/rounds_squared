@@ -140,12 +140,16 @@ impl Plugin for MenuUiPlugin {
            .insert_resource(ActiveMenu { is_settings_open: false })
            .insert_resource(GameplayInputDelay(0.0))
            .insert_resource(ActiveSettingInput::default())
+           .insert_resource(crate::net::OnlineCodeResource::default())
            // Input delay on gameplay entry
            .add_systems(OnEnter(GameState::Gameplay), reset_input_delay)
            .add_systems(Update, tick_input_delay.run_if(in_state(GameState::Gameplay)))
            // Main Menu events
            .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
            .add_systems(OnExit(GameState::MainMenu), cleanup_main_menu)
+           // Online Matchmaking setup menu
+           .add_systems(OnEnter(GameState::OnlineMenu), setup_online_menu)
+           .add_systems(OnExit(GameState::OnlineMenu), cleanup_online_menu)
            // Matchmaking screen events
            .add_systems(OnEnter(GameState::Matchmaking), setup_matchmaking_ui)
            .add_systems(OnExit(GameState::Matchmaking), cleanup_matchmaking_ui)
@@ -161,6 +165,11 @@ impl Plugin for MenuUiPlugin {
                settings_keyboard_input_system,
                settings_scroll_system,
                settings_keyboard_scroll_system,
+               // Online Menu systems
+               online_menu_ui_watcher.run_if(in_state(GameState::OnlineMenu)),
+               online_menu_keyboard_input_system.run_if(in_state(GameState::OnlineMenu)),
+               online_menu_button_system.run_if(in_state(GameState::OnlineMenu).or(in_state(GameState::Matchmaking))),
+               join_code_ui_sync_system.run_if(in_state(GameState::OnlineMenu)),
            ));
     }
 }
@@ -254,7 +263,7 @@ fn setup_main_menu(
     )).with_children(|parent| {
         // Glowing Title
         parent.spawn((
-            Text::new("ROUNDS SQUARED"),
+            Text::new("SETS"),
             TextFont {
                 font_size: 64.0,
                 ..default()
@@ -772,7 +781,7 @@ fn button_interaction_system(
                             state.set(GameState::Lobby);
                         }
                         MenuButton::FindMatch => {
-                            state.set(GameState::Matchmaking);
+                            state.set(GameState::OnlineMenu);
                         }
                         MenuButton::Continue => {
                             paused.0 = false;
@@ -1196,9 +1205,439 @@ fn tick_input_delay(time: Res<Time>, mut delay: ResMut<GameplayInputDelay>) {
 #[derive(Component)]
 pub struct MatchmakingContainer;
 
-pub fn setup_matchmaking_ui(
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ActiveJoinCodeTyping {
+    pub is_typing: bool,
+    pub code: String,
+}
+
+#[derive(Component)]
+pub struct OnlineMenuContainer;
+
+#[derive(Component)]
+pub struct JoinCodeDisplayText;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnlineMenuButton {
+    PublicMatch,
+    HostGame,
+    JoinGame,
+    ConnectWithCode,
+    BackToMainMenu,
+    BackToOnlineMenu,
+}
+
+#[cfg(target_os = "windows")]
+pub fn copy_to_clipboard(text: &str) {
+    use std::process::Command;
+    let _ = Command::new("powershell")
+        .args(["-Command", &format!("Set-Clipboard -Value '{}'", text)])
+        .spawn();
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn copy_to_clipboard(_text: &str) {
+    // Fallback for non-windows platforms
+}
+
+pub fn generate_join_code() -> String {
+    #[cfg(target_arch = "wasm32")]
+    let seed = js_sys::Date::now() as u64;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let seed = {
+        use std::time::SystemTime;
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64
+    };
+
+    let mut x = seed;
+    x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let code = 100000 + (x % 900000);
+    code.to_string()
+}
+
+pub fn setup_online_menu(mut commands: Commands) {
+    commands.insert_resource(ActiveJoinCodeTyping {
+        is_typing: false,
+        code: String::new(),
+    });
+}
+
+pub fn cleanup_online_menu(
+    mut commands: Commands,
+    container_q: Query<Entity, With<OnlineMenuContainer>>,
+) {
+    for entity in container_q.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<ActiveJoinCodeTyping>();
+}
+
+fn spawn_online_button(
+    builder: &mut ChildSpawnerCommands,
+    label: &str,
+    button_action: OnlineMenuButton,
+    theme_color: Color,
+) {
+    builder.spawn((
+        Button,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(44.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.5)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            margin: UiRect { top: Val::Px(8.0), ..default() },
+            ..default()
+        },
+        BorderColor::all(Color::srgb(0.2, 0.2, 0.2)),
+        BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.85)),
+        button_action,
+    )).with_children(|btn_parent| {
+        btn_parent.spawn((
+            Text::new(label),
+            TextFont {
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(theme_color),
+        ));
+    });
+}
+
+pub fn online_menu_ui_watcher(
+    mut commands: Commands,
+    typing: Res<ActiveJoinCodeTyping>,
+    container_q: Query<Entity, With<OnlineMenuContainer>>,
+    mut last_is_typing: Local<Option<bool>>,
+) {
+    let container_empty = container_q.is_empty();
+    if container_empty || last_is_typing.is_none() || last_is_typing.unwrap() != typing.is_typing {
+        *last_is_typing = Some(typing.is_typing);
+        for entity in container_q.iter() {
+            commands.entity(entity).despawn();
+        }
+        setup_online_menu_inner(&mut commands, &typing);
+    }
+}
+
+fn setup_online_menu_inner(
+    commands: &mut Commands,
+    typing: &ActiveJoinCodeTyping,
+) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.01, 0.01, 0.01, 0.98)),
+        OnlineMenuContainer,
+    )).with_children(|parent| {
+        if !typing.is_typing {
+            parent.spawn((
+                Text::new("ONLINE MULTIPLAYER"),
+                TextFont {
+                    font_size: 48.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.0, 1.0, 0.5)),
+                Node {
+                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
+                    ..default()
+                },
+            ));
+
+            parent.spawn((
+                Text::new("SELECT LOBBY CONFIGURATION"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                Node {
+                    margin: UiRect { bottom: Val::Px(45.0), ..default() },
+                    ..default()
+                },
+            ));
+
+            parent.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(15.0),
+                width: Val::Px(360.0),
+                ..default()
+            }).with_children(|menu_parent| {
+                spawn_online_button(menu_parent, "PUBLIC MATCHMAKING", OnlineMenuButton::PublicMatch, Color::srgb(0.0, 1.0, 0.5));
+                spawn_online_button(menu_parent, "HOST PRIVATE GAME", OnlineMenuButton::HostGame, Color::srgb(0.0, 0.83, 1.0));
+                spawn_online_button(menu_parent, "JOIN PRIVATE GAME", OnlineMenuButton::JoinGame, Color::srgb(1.0, 0.55, 0.04));
+                spawn_online_button(menu_parent, "BACK TO MAIN MENU", OnlineMenuButton::BackToMainMenu, Color::srgb(0.9, 0.2, 0.2));
+            });
+        } else {
+            parent.spawn((
+                Text::new("JOIN PRIVATE GAME"),
+                TextFont {
+                    font_size: 48.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.55, 0.04)),
+                Node {
+                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
+                    ..default()
+                },
+            ));
+
+            parent.spawn((
+                Text::new("ENTER THE 6-DIGIT ROOM CODE PROVIDED BY HOST"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                Node {
+                    margin: UiRect { bottom: Val::Px(40.0), ..default() },
+                    ..default()
+                },
+            ));
+
+            parent.spawn((
+                Node {
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    padding: UiRect::all(Val::Px(20.0)),
+                    margin: UiRect { bottom: Val::Px(30.0), ..default() },
+                    width: Val::Px(420.0),
+                    ..default()
+                },
+                BorderColor::all(Color::srgb(1.0, 0.55, 0.04)),
+                BackgroundColor(Color::srgba(0.03, 0.03, 0.03, 0.95)),
+            )).with_children(|box_parent| {
+                let mut display = String::new();
+                for i in 0..6 {
+                    if i == 3 {
+                        display.push_str(" ");
+                    }
+                    if i < typing.code.len() {
+                        display.push(typing.code.chars().nth(i).unwrap());
+                    } else {
+                        display.push('_');
+                    }
+                    if i < 5 {
+                        display.push(' ');
+                    }
+                }
+                box_parent.spawn((
+                    Text::new(display),
+                    TextFont {
+                        font_size: 48.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    JoinCodeDisplayText,
+                ));
+            });
+
+            parent.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                width: Val::Px(320.0),
+                ..default()
+            }).with_children(|menu_parent| {
+                spawn_online_button(menu_parent, "CONNECT TO HOST", OnlineMenuButton::ConnectWithCode, Color::srgb(0.0, 1.0, 0.5));
+                spawn_online_button(menu_parent, "BACK", OnlineMenuButton::BackToOnlineMenu, Color::srgb(0.9, 0.2, 0.2));
+            });
+        }
+    });
+}
+
+pub fn online_menu_button_system(
+    mut interaction_query: Query<
+        (&Interaction, &mut BorderColor, &mut BackgroundColor, &OnlineMenuButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut state: ResMut<NextState<GameState>>,
+    mut typing_res: Option<ResMut<ActiveJoinCodeTyping>>,
+    mut code_res: ResMut<crate::net::OnlineCodeResource>,
     mut commands: Commands,
 ) {
+    for (interaction, mut border, mut bg, btn) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg = BackgroundColor(Color::srgba(1.0, 0.55, 0.04, 0.35));
+                *border = BorderColor::all(Color::srgb(1.0, 0.55, 0.04));
+
+                match btn {
+                    OnlineMenuButton::PublicMatch => {
+                        code_res.code = String::new();
+                        code_res.is_host = false;
+                        state.set(GameState::Matchmaking);
+                    }
+                    OnlineMenuButton::HostGame => {
+                        let code = generate_join_code();
+                        code_res.code = code.clone();
+                        code_res.is_host = true;
+                        
+                        // Copy formatted code to clipboard
+                        let formatted_code = format!("{} {}", &code[..3], &code[3..]);
+                        copy_to_clipboard(&formatted_code);
+                        
+                        state.set(GameState::Matchmaking);
+                    }
+                    OnlineMenuButton::JoinGame => {
+                        if let Some(ref mut typing) = typing_res {
+                            typing.is_typing = true;
+                            typing.code.clear();
+                        }
+                    }
+                    OnlineMenuButton::ConnectWithCode => {
+                        if let Some(ref mut typing) = typing_res {
+                            if typing.code.len() == 6 {
+                                code_res.code = typing.code.clone();
+                                code_res.is_host = false;
+                                state.set(GameState::Matchmaking);
+                            }
+                        }
+                    }
+                    OnlineMenuButton::BackToMainMenu => {
+                        state.set(GameState::MainMenu);
+                    }
+                    OnlineMenuButton::BackToOnlineMenu => {
+                        // Disconnect Matchmaking socket if canceling
+                        commands.remove_resource::<crate::net::MatchboxSocketResource>();
+                        if let Some(ref mut typing) = typing_res {
+                            typing.is_typing = false;
+                            typing.code.clear();
+                        }
+                        state.set(GameState::OnlineMenu);
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg = BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.95));
+                *border = BorderColor::all(Color::srgb(1.0, 0.55, 0.04));
+            }
+            Interaction::None => {
+                *bg = BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.85));
+                *border = BorderColor::all(Color::srgb(0.2, 0.2, 0.2));
+            }
+        }
+    }
+}
+
+pub fn online_menu_keyboard_input_system(
+    mut events: MessageReader<KeyboardInput>,
+    mut typing: ResMut<ActiveJoinCodeTyping>,
+    mut state: ResMut<NextState<GameState>>,
+    mut code_res: ResMut<crate::net::OnlineCodeResource>,
+) {
+    if !typing.is_typing {
+        return;
+    }
+
+    for event in events.read() {
+        if event.state.is_pressed() {
+            match &event.logical_key {
+                Key::Character(c) => {
+                    // Only allow numeric digits 0-9
+                    if c.chars().all(|ch| ch.is_ascii_digit()) && typing.code.len() < 6 {
+                        typing.code.push_str(&c);
+                    }
+                }
+                Key::Backspace => {
+                    typing.code.pop();
+                }
+                Key::Enter => {
+                    if typing.code.len() == 6 {
+                        code_res.code = typing.code.clone();
+                        code_res.is_host = false;
+                        state.set(GameState::Matchmaking);
+                    }
+                }
+                Key::Escape => {
+                    typing.is_typing = false;
+                    typing.code.clear();
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+pub fn join_code_ui_sync_system(
+    typing: Res<ActiveJoinCodeTyping>,
+    mut query: Query<&mut Text, With<JoinCodeDisplayText>>,
+) {
+    if typing.is_changed() {
+        for mut text in query.iter_mut() {
+            let mut display = String::new();
+            for i in 0..6 {
+                if i == 3 {
+                    display.push_str(" ");
+                }
+                if i < typing.code.len() {
+                    display.push(typing.code.chars().nth(i).unwrap());
+                } else {
+                    display.push('_');
+                }
+                if i < 5 {
+                    display.push(' ');
+                }
+            }
+            text.0 = display;
+        }
+    }
+}
+
+pub fn setup_matchmaking_ui(
+    mut commands: Commands,
+    code_res: Option<Res<crate::net::OnlineCodeResource>>,
+) {
+    let (title_text, status_text, detail_text) = if let Some(res) = code_res {
+        if res.code.is_empty() {
+            (
+                "PUBLIC MATCHMAKING",
+                "SEARCHING FOR PEER...".to_string(),
+                "Connecting to the public matchmaking lobby.\nThe game will start automatically when a peer joins."
+            )
+        } else {
+            let raw_code = res.code.replace(" ", "");
+            let formatted_code = if raw_code.len() == 6 {
+                format!("{} {}", &raw_code[..3], &raw_code[3..])
+            } else {
+                raw_code.clone()
+            };
+
+            if res.is_host {
+                (
+                    "HOST PRIVATE GAME",
+                    format!("ROOM CODE: {}", formatted_code),
+                    "Share this code with your friend!\nThe code has been copied to your clipboard automatically."
+                )
+            } else {
+                (
+                    "JOIN PRIVATE GAME",
+                    format!("CONNECTING TO ROOM: {}", formatted_code),
+                    "Establishing handshake with Host...\nWaiting for connection to finalize."
+                )
+            }
+        }
+    } else {
+        (
+            "ONLINE MULTIPLAYER",
+            "CONNECTING...".to_string(),
+            "Initiating online multiplayer connection..."
+        )
+    };
+
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -1212,35 +1651,32 @@ pub fn setup_matchmaking_ui(
         BackgroundColor(Color::srgba(0.01, 0.01, 0.01, 0.98)),
         MatchmakingContainer,
     )).with_children(|parent| {
-        // Glowing title
         parent.spawn((
-            Text::new("ONLINE MULTIPLAYER"),
+            Text::new(title_text),
             TextFont {
                 font_size: 48.0,
                 ..default()
             },
-            TextColor(Color::srgb(0.0, 1.0, 0.5)), // Glowing light green
+            TextColor(Color::srgb(0.0, 1.0, 0.5)),
             Node {
                 margin: UiRect { bottom: Val::Px(15.0), ..default() },
                 ..default()
             },
         ));
 
-        // Connection status spinner placeholder
         parent.spawn((
-            Text::new("SEARCHING FOR PEER..."),
+            Text::new(status_text),
             TextFont {
-                font_size: 24.0,
+                font_size: 32.0,
                 ..default()
             },
             TextColor(Color::WHITE),
             Node {
-                margin: UiRect { bottom: Val::Px(30.0), ..default() },
+                margin: UiRect { bottom: Val::Px(20.0), ..default() },
                 ..default()
             },
         ));
 
-        // Instructions box
         parent.spawn((
             Node {
                 flex_direction: FlexDirection::Column,
@@ -1248,33 +1684,29 @@ pub fn setup_matchmaking_ui(
                 padding: UiRect::all(Val::Px(20.0)),
                 border: UiRect::all(Val::Px(1.5)),
                 border_radius: BorderRadius::all(Val::Px(8.0)),
-                width: Val::Px(500.0),
+                width: Val::Px(550.0),
+                margin: UiRect { bottom: Val::Px(20.0), ..default() },
                 ..default()
             },
             BorderColor::all(Color::srgb(0.2, 0.2, 0.2)),
             BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.95)),
         )).with_children(|box_parent| {
             box_parent.spawn((
-                Text::new("DIRECTIONS FOR LOCAL DESKTOP TESTING:"),
+                Text::new(detail_text),
                 TextFont {
                     font_size: 14.0,
                     ..default()
                 },
-                TextColor(Color::srgb(0.0, 0.83, 1.0)),
-                Node {
-                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            box_parent.spawn((
-                Text::new("1. Ensure a Matchbox signaling server is running locally\n   (Default port: 3536)\n\n2. Run a second instance of the game to connect automatically!\n\n3. Game will start instantly once a peer joins the matchmaking lobby."),
-                TextFont {
-                    font_size: 12.0,
-                    ..default()
-                },
                 TextColor(Color::srgb(0.7, 0.7, 0.7)),
             ));
+        });
+
+        // Cancel Button Box
+        parent.spawn(Node {
+            width: Val::Px(280.0),
+            ..default()
+        }).with_children(|cancel_parent| {
+            spawn_online_button(cancel_parent, "CANCEL MATCHMAKING", OnlineMenuButton::BackToOnlineMenu, Color::srgb(0.9, 0.2, 0.2));
         });
     });
 }

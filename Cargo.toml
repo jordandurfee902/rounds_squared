@@ -11,6 +11,9 @@ bevy_ggrs = "0.20.0"
 matchbox_socket = { version = "0.14", features = ["ggrs"] }
 bytemuck = { version = "1.18", features = ["derive"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+
 [profile.release]
 opt-level = "s"
 lto = true

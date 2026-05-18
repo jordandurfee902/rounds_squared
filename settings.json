@@ -14,7 +14,7 @@
     "air_accel": 25.0
   },
   "p1_character": {
-    "health": 100.0,
+    "health": 1.0,
     "speed": 600.0,
     "size": 1.5,
     "damage": 15.0,

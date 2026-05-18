@@ -8,6 +8,7 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::Gameplay), spawn_players.after(crate::map::spawn_platforms))
+           .add_systems(OnExit(GameState::Gameplay), despawn_gameplay_entities)
            .add_systems(Update, (
                player_input.before(crate::physics::forces::apply_gravity_and_movement),
                player_block_system,
@@ -249,7 +250,7 @@ fn player_input(
 
                     if keys.pressed(left_key) { move_dir -= 1.0; }
                     if keys.pressed(right_key) { move_dir += 1.0; }
-                    if keys.just_pressed(jump_key) { jump = true; }
+                    if keys.pressed(jump_key) { jump = true; }
                     if keys.pressed(fast_fall_key) { fast_fall = true; }
                     if keys.just_pressed(reload_key) { reload = true; }
                     
@@ -272,7 +273,7 @@ fn player_input(
                         let stick = gp.left_stick();
                         move_dir = stick.x;
                         let jump_btn = parse_gamepad_button(&ctrl_controls.jump).unwrap_or(GamepadButton::South);
-                        if gp.just_pressed(jump_btn) { jump = true; }
+                        if gp.pressed(jump_btn) { jump = true; }
                         if stick.y < -0.5 { fast_fall = true; }
                         let reload_btn = parse_gamepad_button(&ctrl_controls.reload).unwrap_or(GamepadButton::West);
                         if gp.just_pressed(reload_btn) { reload = true; }
@@ -289,7 +290,7 @@ fn player_input(
                 Player::P1 => {
                     if keys.pressed(KeyCode::KeyA) { move_dir -= 1.0; }
                     if keys.pressed(KeyCode::KeyD) { move_dir += 1.0; }
-                    if keys.just_pressed(KeyCode::KeyW) { jump = true; }
+                    if keys.pressed(KeyCode::KeyW) { jump = true; }
                     if keys.pressed(KeyCode::KeyS) { fast_fall = true; }
                     if keys.just_pressed(KeyCode::KeyR) { reload = true; }
                     if mouse.just_pressed(MouseButton::Right) { block = true; }
@@ -300,7 +301,7 @@ fn player_input(
                     if let Some(gp) = first_gamepad {
                         let stick = gp.left_stick();
                         move_dir = stick.x;
-                        if gp.just_pressed(GamepadButton::South) { jump = true; }
+                        if gp.pressed(GamepadButton::South) { jump = true; }
                         if stick.y < -0.5 { fast_fall = true; }
                         if gp.just_pressed(GamepadButton::West) { reload = true; }
                         if gp.just_pressed(GamepadButton::LeftTrigger2) { block = true; }
@@ -308,7 +309,7 @@ fn player_input(
                     } else {
                         if keys.pressed(KeyCode::ArrowLeft) { move_dir -= 1.0; }
                         if keys.pressed(KeyCode::ArrowRight) { move_dir += 1.0; }
-                        if keys.just_pressed(KeyCode::ArrowUp) { jump = true; }
+                        if keys.pressed(KeyCode::ArrowUp) { jump = true; }
                         if keys.pressed(KeyCode::ArrowDown) { fast_fall = true; }
                         if keys.just_pressed(KeyCode::KeyU) { block = true; }
                         if keys.just_pressed(KeyCode::KeyI) { reload = true; }
@@ -419,6 +420,23 @@ pub fn player_block_system(
             block.active_timer = block.block_duration;
             block.cooldown_timer = block.block_cooldown;
         }
+    }
+}
+
+fn despawn_gameplay_entities(
+    mut commands: Commands,
+    players_q: Query<Entity, With<Player>>,
+    projectiles_q: Query<Entity, With<crate::physics::weapon::Projectile>>,
+    particles_q: Query<Entity, With<crate::physics::particles::Particle>>,
+) {
+    for entity in players_q.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in projectiles_q.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in particles_q.iter() {
+        commands.entity(entity).despawn();
     }
 }
 

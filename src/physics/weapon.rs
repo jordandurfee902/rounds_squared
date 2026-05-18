@@ -149,7 +149,6 @@ pub fn weapon_fire_system(
 pub fn projectile_physics_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut gizmos: Gizmos,
     mut projectiles: Query<(Entity, &mut Transform, &mut Projectile), (Without<Platform>, Without<Player>)>,
     platforms: Query<(&Transform, &Collider), (With<Platform>, Without<Projectile>, Without<Player>)>,
     mut players: Query<(Entity, &Transform, &Collider, &Player, &mut Health, &crate::player::PlayerStatsComponent, &crate::player::BlockComponent), (Without<Projectile>, Without<Platform>)>,
@@ -188,79 +187,6 @@ pub fn projectile_physics_system(
         // 1. Move Projectile coordinates
         proj_transform.translation += (proj.velocity * dt).extend(0.0);
         let curr_pos = proj_transform.translation.xy();
-
-        // Color theme based on bullet owner (Green for Poison, Blue for P1, Orange for P2)
-        let bullet_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
-            Color::srgb(0.2, 0.9, 0.2)
-        } else {
-            match proj.owner {
-                Player::P1 => Color::srgb(0.3, 0.8, 1.0),
-                Player::P2 => Color::srgb(1.0, 0.6, 0.2),
-            }
-        };
-
-        // Render beautiful bullet visuals based on damage stage
-        if proj.damage >= 90.0 {
-            // --- FINAL COSMIC METEOR STAGE ---
-            // 1. Draw a beautiful, solid-feeling vector teardrop flame behind the meteor
-            let forward_dir = proj.velocity.normalize_or_zero();
-            let right_dir = Vec2::new(-forward_dir.y, forward_dir.x);
-            let tail_len = bullet_radius * 3.8;
-            let tail_tip = curr_pos - forward_dir * tail_len;
-            
-            // Draw nested overlapping triangles from the meteor outer shell tapering to a point
-            for t_pct in [0.2, 0.4, 0.6, 0.8, 1.0] {
-                let width = bullet_radius * t_pct;
-                let left_base = curr_pos + right_dir * width - forward_dir * (bullet_radius * 0.3);
-                let right_base = curr_pos - right_dir * width - forward_dir * (bullet_radius * 0.3);
-                
-                let color = if t_pct <= 0.4 {
-                    Color::srgba(1.0, 1.0, 1.0, 0.4) // White-hot inner flame core
-                } else if t_pct <= 0.7 {
-                    Color::srgba(0.9, 0.4, 1.0, 0.25) // Glowing violet mid-flame
-                } else {
-                    Color::srgba(0.6, 0.0, 1.0, 0.15) // Deep cosmic outer tail
-                };
-                
-                gizmos.line_2d(left_base, tail_tip, color);
-                gizmos.line_2d(right_base, tail_tip, color);
-                gizmos.line_2d(left_base, right_base, color);
-            }
-
-            // 2. Draw solid-looking packed concentric meteor spheres
-            for r_pct in [0.15, 0.35, 0.55, 0.75, 0.95, 1.0] {
-                let r = bullet_radius * r_pct;
-                let color = if r_pct <= 0.35 {
-                    Color::WHITE // Blinding white-hot solid center core
-                } else if r_pct <= 0.75 {
-                    Color::srgb(0.9, 0.4, 1.0) // Molten Violet mid shell
-                } else {
-                    Color::srgb(0.6, 0.0, 1.0) // Cosmic Neon Violet outer crust
-                };
-                gizmos.circle_2d(curr_pos, r, color);
-            }
-        } else {
-            // --- STANDARD BULLET RENDERING ---
-            gizmos.circle_2d(curr_pos, bullet_radius, bullet_color);
-            let trail_len = proj.velocity * 0.015;
-            gizmos.line_2d(curr_pos - trail_len, curr_pos, bullet_color);
-        }
-
-        // Spawn beautiful physical trail particles scaled by sqrt(damage)
-        spawn_trail_particle(
-            &mut commands,
-            curr_pos,
-            bullet_color,
-            proj.damage,
-            proj.velocity,
-            rng_seed * 200,
-        );
-
-        // Visual Special Effects: Poison Cloud neon green outer halo
-        if proj.special_effects.contains(&"PoisonCloud".to_string()) {
-            // Neon green outer glowing halo
-            gizmos.circle_2d(curr_pos, bullet_radius + 4.0, Color::srgb(0.2, 0.9, 0.2));
-        }
 
         // 2. Check Playfield Boundaries
         let mut out_of_bounds = false;
@@ -429,6 +355,93 @@ pub fn projectile_physics_system(
 
         if hit_detected {
             commands.entity(proj_entity).despawn();
+        }
+    }
+}
+
+pub fn draw_projectiles(
+    mut commands: Commands,
+    mut gizmos: Gizmos,
+    projectiles: Query<(&Transform, &Projectile)>,
+) {
+    let mut rng_seed = 0u32;
+    for (transform, proj) in projectiles.iter() {
+        rng_seed += 1;
+        let scale = proj.player_scale;
+        let bullet_radius = proj.damage.sqrt() * proj.size_multiplier * scale;
+        let curr_pos = transform.translation.xy();
+
+        // Color theme based on bullet owner (Green for Poison, Blue for P1, Orange for P2)
+        let bullet_color = if proj.special_effects.contains(&"PoisonCloud".to_string()) {
+            Color::srgb(0.2, 0.9, 0.2)
+        } else {
+            match proj.owner {
+                Player::P1 => Color::srgb(0.3, 0.8, 1.0),
+                Player::P2 => Color::srgb(1.0, 0.6, 0.2),
+            }
+        };
+
+        // Render beautiful bullet visuals based on damage stage
+        if proj.damage >= 90.0 {
+            // --- FINAL COSMIC METEOR STAGE ---
+            // 1. Draw a beautiful, solid-feeling vector teardrop flame behind the meteor
+            let forward_dir = proj.velocity.normalize_or_zero();
+            let right_dir = Vec2::new(-forward_dir.y, forward_dir.x);
+            let tail_len = bullet_radius * 3.8;
+            let tail_tip = curr_pos - forward_dir * tail_len;
+            
+            // Draw nested overlapping triangles from the meteor outer shell tapering to a point
+            for t_pct in [0.2, 0.4, 0.6, 0.8, 1.0] {
+                let width = bullet_radius * t_pct;
+                let left_base = curr_pos + right_dir * width - forward_dir * (bullet_radius * 0.3);
+                let right_base = curr_pos - right_dir * width - forward_dir * (bullet_radius * 0.3);
+                
+                let color = if t_pct <= 0.4 {
+                    Color::srgba(1.0, 1.0, 1.0, 0.4) // White-hot inner flame core
+                } else if t_pct <= 0.7 {
+                    Color::srgba(0.9, 0.4, 1.0, 0.25) // Glowing violet mid-flame
+                } else {
+                    Color::srgba(0.6, 0.0, 1.0, 0.15) // Deep cosmic outer tail
+                };
+                
+                gizmos.line_2d(left_base, tail_tip, color);
+                gizmos.line_2d(right_base, tail_tip, color);
+                gizmos.line_2d(left_base, right_base, color);
+            }
+
+            // 2. Draw solid-looking packed concentric meteor spheres
+            for r_pct in [0.15, 0.35, 0.55, 0.75, 0.95, 1.0] {
+                let r = bullet_radius * r_pct;
+                let color = if r_pct <= 0.35 {
+                    Color::WHITE // Blinding white-hot solid center core
+                } else if r_pct <= 0.75 {
+                    Color::srgb(0.9, 0.4, 1.0) // Molten Violet mid shell
+                } else {
+                    Color::srgb(0.6, 0.0, 1.0) // Cosmic Neon Violet outer crust
+                };
+                gizmos.circle_2d(curr_pos, r, color);
+            }
+        } else {
+            // --- STANDARD BULLET RENDERING ---
+            gizmos.circle_2d(curr_pos, bullet_radius, bullet_color);
+            let trail_len = proj.velocity * 0.015;
+            gizmos.line_2d(curr_pos - trail_len, curr_pos, bullet_color);
+        }
+
+        // Spawn beautiful physical trail particles scaled by sqrt(damage)
+        spawn_trail_particle(
+            &mut commands,
+            curr_pos,
+            bullet_color,
+            proj.damage,
+            proj.velocity,
+            rng_seed * 200,
+        );
+
+        // Visual Special Effects: Poison Cloud neon green outer halo
+        if proj.special_effects.contains(&"PoisonCloud".to_string()) {
+            // Neon green outer glowing halo
+            gizmos.circle_2d(curr_pos, bullet_radius + 4.0, Color::srgb(0.2, 0.9, 0.2));
         }
     }
 }

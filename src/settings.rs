@@ -5,10 +5,11 @@ use std::io::Read;
 
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
 pub enum GameState {
+    #[default]
     MainMenu,
     Lobby,
+    OnlineMenu,
     Matchmaking,
-    #[default]
     Gameplay,
     CardSelection,
 }
