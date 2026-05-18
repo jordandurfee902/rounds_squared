@@ -48,10 +48,13 @@ fn main() {
         .rollback_component_with_copy::<Health>()
         .rollback_component_with_copy::<PlayerStatsComponent>()
         .rollback_component_with_copy::<BlockComponent>()
+        .rollback_component_with_copy::<crate::physics::anim::PlayerAim>()
+        .rollback_component_with_clone::<crate::physics::weapon::Weapon>()
         .rollback_component_with_clone::<crate::physics::weapon::Projectile>()
         .rollback_resource_with_copy::<net::RollbackRng>()
         .rollback_resource_with_copy::<crate::settings::ScoreTracker>()
         .rollback_resource_with_copy::<crate::maps::ActiveMap>()
+        .rollback_resource_with_clone::<crate::settings::LobbySlots>()
         .rollback_resource_with_clone::<crate::physics::card_selection::CardSelectionState>()
         .rollback_resource_with_clone::<crate::settings::PersistentPlayerStats>()
         .run();
