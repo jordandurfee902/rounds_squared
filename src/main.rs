@@ -16,34 +16,21 @@ use map::*;
 use bevy_ggrs::RollbackApp;
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        std::env::set_var("WGPU_BACKEND", "dx12");
+    }
+
     App::new()
-        .add_plugins(DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "SETS".into(),
-                    canvas: Some("#bevy-canvas".into()),
-                    fit_canvas_to_parent: true,
-                    ..default()
-                }),
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "SETS".into(),
+                canvas: Some("#bevy-canvas".into()),
+                fit_canvas_to_parent: true,
                 ..default()
-            })
-            .set(bevy::render::RenderPlugin {
-                render_creation: {
-                    #[cfg(target_os = "windows")]
-                    {
-                        bevy::render::settings::RenderCreation::Automatic(bevy::render::settings::WgpuSettings {
-                            backends: Some(bevy::render::settings::Backends::DX12),
-                            ..default()
-                        })
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        bevy::render::settings::RenderCreation::default()
-                    }
-                },
-                ..default()
-            })
-        )
+            }),
+            ..default()
+        }))
         .add_plugins((SettingsPlugin, PhysicsPlugin, PlayerPlugin, GraphicsPlugin, MapPlugin))
         .add_plugins(bevy_ggrs::GgrsPlugin::<net::GgrsConfig>::default())
         .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.05)))
