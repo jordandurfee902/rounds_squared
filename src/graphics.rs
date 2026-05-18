@@ -48,9 +48,15 @@ fn fit_viewport(
         (width, height, 0.0, y)
     };
 
+    let scale_factor = window.scale_factor();
+    let phys_width = (width * scale_factor) as u32;
+    let phys_height = (height * scale_factor) as u32;
+    let phys_x = (x * scale_factor) as u32;
+    let phys_y = (y * scale_factor) as u32;
+
     camera.viewport = Some(Viewport {
-        physical_position: UVec2::new(x as u32, y as u32),
-        physical_size: UVec2::new(width as u32, height as u32),
+        physical_position: UVec2::new(phys_x, phys_y),
+        physical_size: UVec2::new(phys_width, phys_height),
         depth: 0.0..1.0,
     });
 }
