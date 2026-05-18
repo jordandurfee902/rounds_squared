@@ -57,10 +57,15 @@ pub fn update_aim(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     lobby_slots: Res<LobbySlots>,
+    is_networked: Option<Res<crate::net::IsNetworked>>,
+    local_player_idx: Option<Res<crate::net::LocalPlayerIndex>>,
 ) {
     let Some(window) = windows.iter().next() else {
         return;
     };
+    
+    let is_net = is_networked.map(|n| n.0).unwrap_or(false);
+    let local_idx = local_player_idx.map(|idx| idx.0).unwrap_or(0);
     
     // Physical cursor position in pixel coordinates (origin is top-left)
     let cursor_pos = window.cursor_position();
@@ -85,6 +90,16 @@ pub fn update_aim(
     };
 
     for (player, transform, velocity, mut aim, stats) in query.iter_mut() {
+        if is_net {
+            let local_player = match local_idx {
+                0 => Player::P1,
+                _ => Player::P2,
+            };
+            if *player != local_player {
+                continue; // Skip updating remote player's aim locally!
+            }
+        }
+
         let slot = match player {
             Player::P1 => &lobby_slots.p1,
             Player::P2 => &lobby_slots.p2,
