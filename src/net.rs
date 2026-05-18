@@ -297,9 +297,10 @@ pub fn ggrs_input_system(
 
         let mut buttons = 0u8;
         if is_card_selection {
-            if left_nav { buttons |= 1 << 5; }
-            if right_nav { buttons |= 1 << 6; }
-            if confirm_nav { buttons |= 1 << 7; }
+            if left_nav { buttons |= 1 << 0; }
+            if right_nav { buttons |= 1 << 1; }
+            if confirm_nav { buttons |= 1 << 2; }
+            buttons |= 1 << 7; // FLAG: Card Selection Mode Active!
         } else {
             if jump { buttons |= 1 << 0; }
             if fast_fall { buttons |= 1 << 1; }
@@ -346,11 +347,20 @@ pub fn unpack_network_inputs(
         };
 
         input.move_dir = ggrs_input.move_dir_packed as f32 / 100.0;
-        input.jump = (ggrs_input.buttons & (1 << 0)) != 0;
-        input.fast_fall = (ggrs_input.buttons & (1 << 1)) != 0;
-        input.fire = (ggrs_input.buttons & (1 << 2)) != 0;
-        input.reload = (ggrs_input.buttons & (1 << 3)) != 0;
-        input.block = (ggrs_input.buttons & (1 << 4)) != 0;
+        let is_card_selection_mode = (ggrs_input.buttons & (1 << 7)) != 0;
+        if is_card_selection_mode {
+            input.jump = false;
+            input.fast_fall = false;
+            input.fire = false;
+            input.reload = false;
+            input.block = false;
+        } else {
+            input.jump = (ggrs_input.buttons & (1 << 0)) != 0;
+            input.fast_fall = (ggrs_input.buttons & (1 << 1)) != 0;
+            input.fire = (ggrs_input.buttons & (1 << 2)) != 0;
+            input.reload = (ggrs_input.buttons & (1 << 3)) != 0;
+            input.block = (ggrs_input.buttons & (1 << 4)) != 0;
+        }
 
         let aim_x = ggrs_input.aim_dir_packed_x as f32 / 100.0;
         let aim_y = ggrs_input.aim_dir_packed_y as f32 / 100.0;
@@ -444,9 +454,14 @@ pub fn card_selection_sync_network_system(
         return;
     };
 
-    let left_nav = (input.buttons & (1 << 5)) != 0;
-    let right_nav = (input.buttons & (1 << 6)) != 0;
-    let confirm = (input.buttons & (1 << 7)) != 0;
+    let is_card_selection_mode = (input.buttons & (1 << 7)) != 0;
+    if !is_card_selection_mode {
+        return; // Ignore gameplay inputs during transitions!
+    }
+
+    let left_nav = (input.buttons & (1 << 0)) != 0;
+    let right_nav = (input.buttons & (1 << 1)) != 0;
+    let confirm = (input.buttons & (1 << 2)) != 0;
 
     if left_nav {
         card_state.selected_idx = if card_state.selected_idx == 0 { 4 } else { card_state.selected_idx - 1 };
