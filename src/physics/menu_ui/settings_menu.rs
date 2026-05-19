@@ -1,382 +1,14 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use bevy::prelude::MessageWriter;
-use bevy::prelude::MessageReader;
+use bevy::prelude::{MessageWriter, MessageReader};
 use bevy::input::keyboard::{KeyboardInput, Key};
 use crate::settings::{PersistentPlayerStats, GameState, PhysicsSettings, ScoreTracker, AppSettings, KeyboardControls, ControllerControls, P1WeaponSettings, P2WeaponSettings};
 use crate::player::PlayerStatsComponent;
 use crate::player::{Player, Health};
 use crate::physics::weapon::Weapon;
+use super::types::*;
 
-// --- Resources ---
-
-#[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct Paused(pub bool);
-
-#[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct ActiveMenu {
-    pub is_settings_open: bool,
-}
-
-#[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct GameplayInputDelay(pub f32);
-
-#[derive(Resource, Default, Debug, Clone)]
-pub struct ActiveSettingInput {
-    pub focused_setting: Option<SettingType>,
-    pub current_text: String,
-}
-
-// --- Components ---
-
-#[derive(Component)]
-pub struct MainMenuContainer;
-
-#[derive(Component)]
-pub struct PauseMenuContainer;
-
-#[derive(Component)]
-pub struct SettingsMenuContainer;
-
-#[derive(Component)]
-pub struct SettingsInnerList {
-    pub scroll_offset: f32,
-}
-
-#[derive(Component)]
-pub enum MenuButton {
-    StartGame,
-    FindMatch,
-    Continue,
-    OpenSettings,
-    CloseSettings,
-    BackToMainMenu,
-    Quit,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum SettingType {
-    // Physics
-    Gravity,
-    PlayerAccel,
-    PlayerJumpForce,
-    BoundaryRestitution,
-    PlayerRestitution,
-    AirFriction,
-    GroundFriction,
-    MovementStopFriction,
-    WallSlideSpeed,
-    WallJumpPushForce,
-    FastFallAcceleration,
-    AirAccel,
-
-    // P1 Character
-    P1Health,
-    P1Speed,
-    P1Size,
-    P1Damage,
-    P1BulletRange,
-    P1BulletSpeed,
-    P1BulletGravity,
-    P1BulletSizeMult,
-    P1BulletGrowth,
-    P1MaxAmmo,
-    P1ReloadTime,
-    P1FireRate,
-    P1Bounces,
-    P1BounceSpeedMultiplier,
-    P1BlockDuration,
-    P1BlockCooldown,
-    P1BlockBorderBoost,
-
-    // P2 Character
-    P2Health,
-    P2Speed,
-    P2Size,
-    P2Damage,
-    P2BulletRange,
-    P2BulletSpeed,
-    P2BulletGravity,
-    P2BulletSizeMult,
-    P2BulletGrowth,
-    P2MaxAmmo,
-    P2ReloadTime,
-    P2FireRate,
-    P2Bounces,
-    P2BounceSpeedMultiplier,
-    P2BlockDuration,
-    P2BlockCooldown,
-    P2BlockBorderBoost,
-
-    // Keyboard Controls
-    KbMoveLeft,
-    KbMoveRight,
-    KbJump,
-    KbFastFall,
-    KbBlock,
-    KbShoot,
-    KbReload,
-
-    // Controller Controls
-    CtrlJump,
-    CtrlBlock,
-    CtrlShoot,
-    CtrlReload,
-}
-
-#[derive(Component)]
-pub struct SettingInputBox(pub SettingType);
-
-#[derive(Component)]
-pub struct SettingValueText(pub SettingType);
-
-// --- Plugin Implementation ---
-
-pub struct MenuUiPlugin;
-
-impl Plugin for MenuUiPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(Paused(false))
-           .insert_resource(ActiveMenu { is_settings_open: false })
-           .insert_resource(GameplayInputDelay(0.0))
-           .insert_resource(ActiveSettingInput::default())
-           .insert_resource(crate::net::OnlineCodeResource::default())
-           // Input delay on gameplay entry
-           .add_systems(OnEnter(GameState::Gameplay), reset_input_delay)
-           .add_systems(Update, tick_input_delay.run_if(in_state(GameState::Gameplay)))
-           // Main Menu events
-           .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
-           .add_systems(OnExit(GameState::MainMenu), cleanup_main_menu)
-           // Online Matchmaking setup menu
-           .add_systems(OnEnter(GameState::OnlineMenu), setup_online_menu)
-           .add_systems(OnExit(GameState::OnlineMenu), cleanup_online_menu)
-           // Matchmaking screen events
-           .add_systems(OnEnter(GameState::Matchmaking), setup_matchmaking_ui)
-           .add_systems(OnExit(GameState::Matchmaking), cleanup_matchmaking_ui)
-           // Reset/Teardown when entering Main Menu or starting a new game Lobby
-           .add_systems(OnEnter(GameState::MainMenu), reset_and_cleanup_gameplay)
-           .add_systems(OnEnter(GameState::Lobby), reset_and_cleanup_gameplay)
-           // Pause & Settings Menu events
-           .add_systems(Update, (
-               pause_input_system,
-               pause_menu_state_watcher,
-               button_interaction_system,
-               settings_value_sync_system,
-               settings_keyboard_input_system,
-               settings_scroll_system,
-               settings_keyboard_scroll_system,
-               // Online Menu systems
-               online_menu_ui_watcher.run_if(in_state(GameState::OnlineMenu)),
-               online_menu_keyboard_input_system.run_if(in_state(GameState::OnlineMenu)),
-               online_menu_button_system.run_if(in_state(GameState::OnlineMenu).or(in_state(GameState::Matchmaking))),
-               join_code_ui_sync_system.run_if(in_state(GameState::OnlineMenu)),
-           ));
-    }
-}
-
-// --- Systems ---
-
-/// Keyboard input checks for escape during Gameplay
-fn pause_input_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    state: Res<State<GameState>>,
-    mut paused: ResMut<Paused>,
-    mut menu: ResMut<ActiveMenu>,
-    mut active_input: ResMut<ActiveSettingInput>,
-) {
-    if keys.just_pressed(KeyCode::Escape) && *state.get() == GameState::Gameplay {
-        active_input.focused_setting = None;
-        active_input.current_text.clear();
-        if menu.is_settings_open {
-            menu.is_settings_open = false;
-        } else {
-            paused.0 = !paused.0;
-        }
-    }
-}
-
-/// Watches the `Paused` and `ActiveMenu` resources in Gameplay state and manages the overlay UI nodes
-fn pause_menu_state_watcher(
-    mut commands: Commands,
-    state: Res<State<GameState>>,
-    paused: Res<Paused>,
-    menu: Res<ActiveMenu>,
-    existing_pause: Query<Entity, With<PauseMenuContainer>>,
-    existing_settings: Query<Entity, With<SettingsMenuContainer>>,
-) {
-    if *state.get() != GameState::Gameplay {
-        // Despawn if leaving Gameplay
-        for entity in existing_pause.iter() {
-            commands.entity(entity).despawn();
-        }
-        for entity in existing_settings.iter() {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-
-    // 1. Manage standard Pause Menu
-    let should_show_pause = paused.0 && !menu.is_settings_open;
-    let has_pause = !existing_pause.is_empty();
-
-    if should_show_pause && !has_pause {
-        spawn_pause_menu(&mut commands);
-    } else if (!should_show_pause || *state.get() != GameState::Gameplay) && has_pause {
-        for entity in existing_pause.iter() {
-            commands.entity(entity).despawn();
-        }
-    }
-
-    // 2. Manage Settings overlay
-    let should_show_settings = paused.0 && menu.is_settings_open;
-    let has_settings = !existing_settings.is_empty();
-
-    if should_show_settings && !has_settings {
-        spawn_settings_menu(&mut commands, false); // in-pause settings
-    } else if (!should_show_settings || *state.get() != GameState::Gameplay) && has_settings {
-        for entity in existing_settings.iter() {
-            commands.entity(entity).despawn();
-        }
-    }
-}
-
-// --- Menu Spawners ---
-
-fn setup_main_menu(
-    mut commands: Commands,
-    menu: Res<ActiveMenu>,
-    existing_settings: Query<Entity, With<SettingsMenuContainer>>,
-) {
-    // Spawn root Main Menu UI container
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.01, 0.01, 0.01, 0.98)),
-        MainMenuContainer,
-    )).with_children(|parent| {
-        // Glowing Title
-        parent.spawn((
-            Text::new("SETS"),
-            TextFont {
-                font_size: 64.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.0, 0.83, 1.0)), // Neon Cyan
-            Node {
-                margin: UiRect { bottom: Val::Px(10.0), ..default() },
-                ..default()
-            },
-        ));
-
-        // Sub-title
-        parent.spawn((
-            Text::new("PROCEDURAL 2D ARENA SHOOTER"),
-            TextFont {
-                font_size: 16.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.6, 0.6, 0.6)),
-            Node {
-                margin: UiRect { bottom: Val::Px(45.0), ..default() },
-                ..default()
-            },
-        ));
-
-        // Menu Box
-        parent.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(15.0),
-            width: Val::Px(320.0),
-            ..default()
-        }).with_children(|menu_parent| {
-            spawn_button(menu_parent, "LOCAL PLAY", MenuButton::StartGame, Color::srgb(0.0, 0.83, 1.0));
-            spawn_button(menu_parent, "ONLINE MULTIPLAYER", MenuButton::FindMatch, Color::srgb(0.0, 1.0, 0.5));
-            spawn_button(menu_parent, "SETTINGS", MenuButton::OpenSettings, Color::srgb(1.0, 0.55, 0.04));
-            spawn_button(menu_parent, "QUIT GAME", MenuButton::Quit, Color::srgb(0.9, 0.2, 0.2));
-        });
-    });
-
-    // Check if settings were opened in main menu
-    if menu.is_settings_open && existing_settings.is_empty() {
-        spawn_settings_menu(&mut commands, true);
-    }
-}
-
-fn cleanup_main_menu(
-    mut commands: Commands,
-    query: Query<Entity, With<MainMenuContainer>>,
-    existing_settings: Query<Entity, With<SettingsMenuContainer>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-    for entity in existing_settings.iter() {
-        commands.entity(entity).despawn();
-    }
-}
-
-fn spawn_pause_menu(commands: &mut Commands) {
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.02, 0.02, 0.02, 0.85)),
-        GlobalZIndex(100),
-        PauseMenuContainer,
-    )).with_children(|parent| {
-        // Pause Window Box
-        parent.spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(20.0),
-                padding: UiRect::all(Val::Px(35.0)),
-                width: Val::Px(420.0),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(12.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.0, 0.83, 1.0)),
-            BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.98)),
-        )).with_children(|box_parent| {
-            // Header
-            box_parent.spawn((
-                Text::new("GAME PAUSED"),
-                TextFont {
-                    font_size: 38.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Node {
-                    margin: UiRect { bottom: Val::Px(15.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            // Pause buttons
-            spawn_button(box_parent, "CONTINUE", MenuButton::Continue, Color::srgb(0.0, 0.83, 1.0));
-            spawn_button(box_parent, "SETTINGS", MenuButton::OpenSettings, Color::srgb(1.0, 0.55, 0.04));
-            spawn_button(box_parent, "BACK TO MAIN MENU", MenuButton::BackToMainMenu, Color::srgb(1.0, 0.4, 0.0));
-            spawn_button(box_parent, "QUIT GAME", MenuButton::Quit, Color::srgb(0.9, 0.2, 0.2));
-        });
-    });
-}
-
-fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
+pub fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -468,6 +100,24 @@ fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
                     spawn_setting_row(list, "Wall Jump Push Force", SettingType::WallJumpPushForce);
                     spawn_setting_row(list, "Fast Fall Acceleration", SettingType::FastFallAcceleration);
                     spawn_setting_row(list, "Air Acceleration", SettingType::AirAccel);
+                    spawn_setting_row(list, "Player Base Radius", SettingType::PlayerBaseRadius);
+                    spawn_setting_row(list, "Player Base Mass", SettingType::PlayerBaseMass);
+                    spawn_setting_row(list, "Player Visual Offset", SettingType::PlayerVisualOffset);
+                    spawn_setting_row(list, "Player Aim Offset Y", SettingType::PlayerAimOffsetY);
+                    spawn_setting_row(list, "Boundary Knockback Speed", SettingType::BoundaryKnockbackSpeed);
+                    spawn_setting_row(list, "Boundary Damage Lockout (s)", SettingType::BoundaryDamageLockout);
+                    spawn_setting_row(list, "Boundary Deflect Lockout (s)", SettingType::BoundaryDeflectLockout);
+                    spawn_setting_row(list, "Spawn Grace Period (s)", SettingType::SpawnInvincibilityGracePeriod);
+                    spawn_setting_row(list, "Boundary Hazard Damage", SettingType::BoundaryHazardDamage);
+                    spawn_setting_row(list, "Fast Fall Stick Threshold", SettingType::FastFallStickThreshold);
+                    spawn_setting_row(list, "Fast Fall Velocity Limit", SettingType::FastFallVelocityLimit);
+                    spawn_setting_row(list, "Wall Cling Stick Threshold", SettingType::WallClingStickThreshold);
+                    spawn_setting_row(list, "Max Jump Allowance", SettingType::MaxJumpAllowance);
+                    spawn_setting_row(list, "Collision Skin Buffer", SettingType::CollisionPenetrationSkinBuffer);
+                    spawn_setting_row(list, "Overlapping Push Factor", SettingType::OverlappingPushFactor);
+                    spawn_setting_row(list, "Grounded Slope Threshold", SettingType::GroundedSlopeThreshold);
+                    spawn_setting_row(list, "Wall Contact Slope Threshold", SettingType::WallContactSlopeThreshold);
+                    spawn_setting_row(list, "Bullet Knockback Constant", SettingType::BulletKnockbackConstant);
 
                     // Player 1 Stats
                     spawn_section_header(list, "PLAYER 1 CHARACTER STATISTICS");
@@ -534,9 +184,7 @@ fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
     });
 }
 
-// --- UI Helper Functions ---
-
-fn spawn_button(
+pub fn spawn_button(
     builder: &mut ChildSpawnerCommands,
     label: &str,
     button_action: MenuButton,
@@ -569,7 +217,7 @@ fn spawn_button(
     });
 }
 
-fn spawn_section_header(builder: &mut ChildSpawnerCommands, title: &str) {
+pub fn spawn_section_header(builder: &mut ChildSpawnerCommands, title: &str) {
     builder.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -593,7 +241,7 @@ fn spawn_section_header(builder: &mut ChildSpawnerCommands, title: &str) {
     });
 }
 
-fn spawn_setting_row(
+pub fn spawn_setting_row(
     builder: &mut ChildSpawnerCommands,
     label: &str,
     setting_type: SettingType,
@@ -646,7 +294,7 @@ fn spawn_setting_row(
     });
 }
 
-fn save_and_sync_settings(
+pub fn save_and_sync_settings(
     physics_settings: &PhysicsSettings,
     p1_base: &P1WeaponSettings,
     p2_base: &P2WeaponSettings,
@@ -728,9 +376,7 @@ fn save_and_sync_settings(
     }
 }
 
-// --- Interaction / Live Adjust System ---
-
-fn button_interaction_system(
+pub fn button_interaction_system(
     mut interaction_query: Query<
         (&Interaction, &mut BorderColor, &mut BackgroundColor, Option<&MenuButton>, Option<&SettingInputBox>),
         (Changed<Interaction>, With<Button>),
@@ -838,8 +484,7 @@ fn button_interaction_system(
     }
 }
 
-/// Dynamic value syncer system keeping text value indicators perfectly matches active configurations
-fn settings_value_sync_system(
+pub fn settings_value_sync_system(
     physics_settings: Res<PhysicsSettings>,
     persistent_stats: Res<PersistentPlayerStats>,
     p1_base: Res<P1WeaponSettings>,
@@ -871,8 +516,7 @@ fn settings_value_sync_system(
     }
 }
 
-/// Listens for typed numbers, periods, backspaces, and applies them to resources and serialization files when Enter is pressed!
-fn settings_keyboard_input_system(
+pub fn settings_keyboard_input_system(
     mut events: MessageReader<KeyboardInput>,
     mut active_input: ResMut<ActiveSettingInput>,
     mut physics_settings: ResMut<PhysicsSettings>,
@@ -928,8 +572,7 @@ fn settings_keyboard_input_system(
     }
 }
 
-/// Allows scrolling with mouse wheel inside the settings viewport
-fn settings_scroll_system(
+pub fn settings_scroll_system(
     mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
     mut query: Query<(&mut Node, &mut SettingsInnerList)>,
 ) {
@@ -939,14 +582,13 @@ fn settings_scroll_system(
     }
     if scroll_dy != 0.0 {
         for (mut node, mut list) in query.iter_mut() {
-            list.scroll_offset = (list.scroll_offset + scroll_dy).clamp(-2100.0, 0.0);
+            list.scroll_offset = (list.scroll_offset + scroll_dy).clamp(-3200.0, 0.0);
             node.top = Val::Px(list.scroll_offset);
         }
     }
 }
 
-/// Allows scrolling with Arrow keys / WASD when no text field is focused
-fn settings_keyboard_scroll_system(
+pub fn settings_keyboard_scroll_system(
     keys: Res<ButtonInput<KeyCode>>,
     active_input: Res<ActiveSettingInput>,
     mut query: Query<(&mut Node, &mut SettingsInnerList)>,
@@ -961,21 +603,19 @@ fn settings_keyboard_scroll_system(
         }
         if scroll_dy != 0.0 {
             for (mut node, mut list) in query.iter_mut() {
-                list.scroll_offset = (list.scroll_offset + scroll_dy).clamp(-2100.0, 0.0);
+                list.scroll_offset = (list.scroll_offset + scroll_dy).clamp(-3200.0, 0.0);
                 node.top = Val::Px(list.scroll_offset);
             }
         }
     }
 }
 
-// --- Value Helpers ---
-
-fn get_setting_value(
+pub fn get_setting_value(
     setting: SettingType,
     physics: &PhysicsSettings,
-    _stats: &PersistentPlayerStats,
-    p1_base: &P1WeaponSettings,
-    p2_base: &P2WeaponSettings,
+    stats: &PersistentPlayerStats,
+    _p1_base: &P1WeaponSettings,
+    _p2_base: &P2WeaponSettings,
     kb: &KeyboardControls,
     ctrl: &ControllerControls,
 ) -> String {
@@ -992,42 +632,60 @@ fn get_setting_value(
         SettingType::WallJumpPushForce => format!("{:.0}", physics.wall_jump_push_force),
         SettingType::FastFallAcceleration => format!("{:.0}", physics.fast_fall_acceleration),
         SettingType::AirAccel => format!("{:.1}", physics.air_accel),
+        SettingType::PlayerBaseRadius => format!("{:.1}", physics.player_base_radius),
+        SettingType::PlayerBaseMass => format!("{:.2}", physics.player_base_mass),
+        SettingType::PlayerVisualOffset => format!("{:.1}", physics.player_visual_offset),
+        SettingType::PlayerAimOffsetY => format!("{:.1}", physics.player_aim_offset_y),
+        SettingType::BoundaryKnockbackSpeed => format!("{:.0}", physics.boundary_knockback_speed),
+        SettingType::BoundaryDamageLockout => format!("{:.2}", physics.boundary_damage_lockout),
+        SettingType::BoundaryDeflectLockout => format!("{:.2}", physics.boundary_deflect_lockout),
+        SettingType::SpawnInvincibilityGracePeriod => format!("{:.2}", physics.spawn_invincibility_grace_period),
+        SettingType::BoundaryHazardDamage => format!("{:.1}", physics.boundary_hazard_damage),
+        SettingType::FastFallStickThreshold => format!("{:.2}", physics.fast_fall_stick_threshold),
+        SettingType::FastFallVelocityLimit => format!("{:.1}", physics.fast_fall_velocity_limit),
+        SettingType::WallClingStickThreshold => format!("{:.2}", physics.wall_cling_stick_threshold),
+        SettingType::MaxJumpAllowance => format!("{}", physics.max_jump_allowance),
+        SettingType::CollisionPenetrationSkinBuffer => format!("{:.2}", physics.collision_penetration_skin_buffer),
+        SettingType::OverlappingPushFactor => format!("{:.2}", physics.overlapping_push_factor),
+        SettingType::GroundedSlopeThreshold => format!("{:.2}", physics.grounded_slope_threshold),
+        SettingType::WallContactSlopeThreshold => format!("{:.2}", physics.wall_contact_slope_threshold),
+        SettingType::BulletKnockbackConstant => format!("{:.1}", physics.bullet_knockback_constant),
 
-        SettingType::P1Health => format!("{:.0}", p1_base.0.health),
-        SettingType::P1Speed => format!("{:.0}", p1_base.0.speed),
-        SettingType::P1Size => format!("{:.2}", p1_base.0.size),
-        SettingType::P1Damage => format!("{:.1}", p1_base.0.damage),
-        SettingType::P1BulletRange => format!("{:.2}", p1_base.0.bullet_range),
-        SettingType::P1BulletSpeed => format!("{:.0}", p1_base.0.bullet_speed),
-        SettingType::P1BulletGravity => format!("{:.0}", p1_base.0.bullet_gravity),
-        SettingType::P1BulletSizeMult => format!("{:.2}", p1_base.0.bullet_size_mult),
-        SettingType::P1BulletGrowth => format!("{:.1}", p1_base.0.bullet_growth),
-        SettingType::P1MaxAmmo => format!("{}", p1_base.0.max_ammo),
-        SettingType::P1ReloadTime => format!("{:.2}", p1_base.0.reload_time),
-        SettingType::P1FireRate => format!("{:.3}", p1_base.0.fire_rate),
-        SettingType::P1Bounces => format!("{}", p1_base.0.bounces),
-        SettingType::P1BounceSpeedMultiplier => format!("{:.2}", p1_base.0.bounce_speed_multiplier),
-        SettingType::P1BlockDuration => format!("{:.2}", p1_base.0.block_duration),
-        SettingType::P1BlockCooldown => format!("{:.2}", p1_base.0.block_cooldown),
-        SettingType::P1BlockBorderBoost => format!("{:.0}", p1_base.0.block_border_boost),
+        SettingType::P1Health => format!("{:.0}", stats.p1.health_max),
+        SettingType::P1Speed => format!("{:.0}", stats.p1.movement_speed),
+        SettingType::P1Size => format!("{:.2}", stats.p1.player_scale),
+        SettingType::P1Damage => format!("{:.1}", stats.p1.bullet_damage),
+        SettingType::P1BulletRange => format!("{:.2}", stats.p1.bullet_range),
+        SettingType::P1BulletSpeed => format!("{:.0}", stats.p1.bullet_speed),
+        SettingType::P1BulletGravity => format!("{:.0}", stats.p1.bullet_gravity),
+        SettingType::P1BulletSizeMult => format!("{:.2}", stats.p1.bullet_size_mult),
+        SettingType::P1BulletGrowth => format!("{:.1}", stats.p1.bullet_growth),
+        SettingType::P1MaxAmmo => format!("{}", stats.p1.max_ammo),
+        SettingType::P1ReloadTime => format!("{:.2}", stats.p1.reload_time),
+        SettingType::P1FireRate => format!("{:.3}", stats.p1.fire_rate),
+        SettingType::P1Bounces => format!("{}", stats.p1.bounces),
+        SettingType::P1BounceSpeedMultiplier => format!("{:.2}", stats.p1.bounce_speed_multiplier),
+        SettingType::P1BlockDuration => format!("{:.2}", stats.p1.block_duration),
+        SettingType::P1BlockCooldown => format!("{:.2}", stats.p1.block_cooldown),
+        SettingType::P1BlockBorderBoost => format!("{:.0}", stats.p1.block_border_boost),
 
-        SettingType::P2Health => format!("{:.0}", p2_base.0.health),
-        SettingType::P2Speed => format!("{:.0}", p2_base.0.speed),
-        SettingType::P2Size => format!("{:.2}", p2_base.0.size),
-        SettingType::P2Damage => format!("{:.1}", p2_base.0.damage),
-        SettingType::P2BulletRange => format!("{:.2}", p2_base.0.bullet_range),
-        SettingType::P2BulletSpeed => format!("{:.0}", p2_base.0.bullet_speed),
-        SettingType::P2BulletGravity => format!("{:.0}", p2_base.0.bullet_gravity),
-        SettingType::P2BulletSizeMult => format!("{:.2}", p2_base.0.bullet_size_mult),
-        SettingType::P2BulletGrowth => format!("{:.1}", p2_base.0.bullet_growth),
-        SettingType::P2MaxAmmo => format!("{}", p2_base.0.max_ammo),
-        SettingType::P2ReloadTime => format!("{:.2}", p2_base.0.reload_time),
-        SettingType::P2FireRate => format!("{:.3}", p2_base.0.fire_rate),
-        SettingType::P2Bounces => format!("{}", p2_base.0.bounces),
-        SettingType::P2BounceSpeedMultiplier => format!("{:.2}", p2_base.0.bounce_speed_multiplier),
-        SettingType::P2BlockDuration => format!("{:.2}", p2_base.0.block_duration),
-        SettingType::P2BlockCooldown => format!("{:.2}", p2_base.0.block_cooldown),
-        SettingType::P2BlockBorderBoost => format!("{:.0}", p2_base.0.block_border_boost),
+        SettingType::P2Health => format!("{:.0}", stats.p2.health_max),
+        SettingType::P2Speed => format!("{:.0}", stats.p2.movement_speed),
+        SettingType::P2Size => format!("{:.2}", stats.p2.player_scale),
+        SettingType::P2Damage => format!("{:.1}", stats.p2.bullet_damage),
+        SettingType::P2BulletRange => format!("{:.2}", stats.p2.bullet_range),
+        SettingType::P2BulletSpeed => format!("{:.0}", stats.p2.bullet_speed),
+        SettingType::P2BulletGravity => format!("{:.0}", stats.p2.bullet_gravity),
+        SettingType::P2BulletSizeMult => format!("{:.2}", stats.p2.bullet_size_mult),
+        SettingType::P2BulletGrowth => format!("{:.1}", stats.p2.bullet_growth),
+        SettingType::P2MaxAmmo => format!("{}", stats.p2.max_ammo),
+        SettingType::P2ReloadTime => format!("{:.2}", stats.p2.reload_time),
+        SettingType::P2FireRate => format!("{:.3}", stats.p2.fire_rate),
+        SettingType::P2Bounces => format!("{}", stats.p2.bounces),
+        SettingType::P2BounceSpeedMultiplier => format!("{:.2}", stats.p2.bounce_speed_multiplier),
+        SettingType::P2BlockDuration => format!("{:.2}", stats.p2.block_duration),
+        SettingType::P2BlockCooldown => format!("{:.2}", stats.p2.block_cooldown),
+        SettingType::P2BlockBorderBoost => format!("{:.0}", stats.p2.block_border_boost),
 
         SettingType::KbMoveLeft => kb.move_left.clone(),
         SettingType::KbMoveRight => kb.move_right.clone(),
@@ -1044,7 +702,7 @@ fn get_setting_value(
     }
 }
 
-fn apply_control_setting(
+pub fn apply_control_setting(
     setting: SettingType,
     val: &str,
     kb: &mut KeyboardControls,
@@ -1067,7 +725,7 @@ fn apply_control_setting(
     }
 }
 
-fn apply_setting_value(
+pub fn apply_setting_value(
     setting: SettingType,
     val: f32,
     physics: &mut PhysicsSettings,
@@ -1087,6 +745,24 @@ fn apply_setting_value(
         SettingType::WallJumpPushForce => physics.wall_jump_push_force = val,
         SettingType::FastFallAcceleration => physics.fast_fall_acceleration = val,
         SettingType::AirAccel => physics.air_accel = val,
+        SettingType::PlayerBaseRadius => physics.player_base_radius = val,
+        SettingType::PlayerBaseMass => physics.player_base_mass = val,
+        SettingType::PlayerVisualOffset => physics.player_visual_offset = val,
+        SettingType::PlayerAimOffsetY => physics.player_aim_offset_y = val,
+        SettingType::BoundaryKnockbackSpeed => physics.boundary_knockback_speed = val,
+        SettingType::BoundaryDamageLockout => physics.boundary_damage_lockout = val,
+        SettingType::BoundaryDeflectLockout => physics.boundary_deflect_lockout = val,
+        SettingType::SpawnInvincibilityGracePeriod => physics.spawn_invincibility_grace_period = val,
+        SettingType::BoundaryHazardDamage => physics.boundary_hazard_damage = val,
+        SettingType::FastFallStickThreshold => physics.fast_fall_stick_threshold = val,
+        SettingType::FastFallVelocityLimit => physics.fast_fall_velocity_limit = val,
+        SettingType::WallClingStickThreshold => physics.wall_cling_stick_threshold = val,
+        SettingType::MaxJumpAllowance => physics.max_jump_allowance = val.max(0.0) as u32,
+        SettingType::CollisionPenetrationSkinBuffer => physics.collision_penetration_skin_buffer = val,
+        SettingType::OverlappingPushFactor => physics.overlapping_push_factor = val,
+        SettingType::GroundedSlopeThreshold => physics.grounded_slope_threshold = val,
+        SettingType::WallContactSlopeThreshold => physics.wall_contact_slope_threshold = val,
+        SettingType::BulletKnockbackConstant => physics.bullet_knockback_constant = val,
 
         SettingType::P1Health => p1_base.0.health = val,
         SettingType::P1Speed => p1_base.0.speed = val,
@@ -1127,9 +803,7 @@ fn apply_setting_value(
     }
 }
 
-/// Completely clears the playfield entities and resets player upgrades to loaded JSON configurations
-/// Completely clears the playfield entities and resets player upgrades to loaded configurations
-fn reset_and_cleanup_gameplay(
+pub fn reset_and_cleanup_gameplay(
     mut commands: Commands,
     players_q: Query<Entity, With<PlayerStatsComponent>>,
     weapons_q: Query<Entity, With<crate::physics::weapon::Weapon>>,
@@ -1190,532 +864,4 @@ fn reset_and_cleanup_gameplay(
     persistent_stats.p2.block_border_boost = p2_base.0.block_border_boost;
     persistent_stats.p2.special_effects = p2_base.0.special_effects.clone();
     persistent_stats.p2.cards.clear();
-}
-
-fn reset_input_delay(mut delay: ResMut<GameplayInputDelay>) {
-    delay.0 = 0.2; // 0.2s input delay to absorb click/keyboard releases
-}
-
-fn tick_input_delay(time: Res<Time>, mut delay: ResMut<GameplayInputDelay>) {
-    if delay.0 > 0.0 {
-        delay.0 -= time.delta_secs();
-    }
-}
-
-#[derive(Component)]
-pub struct MatchmakingContainer;
-
-#[derive(Resource, Default, Debug, Clone)]
-pub struct ActiveJoinCodeTyping {
-    pub is_typing: bool,
-    pub code: String,
-}
-
-#[derive(Component)]
-pub struct OnlineMenuContainer;
-
-#[derive(Component)]
-pub struct JoinCodeDisplayText;
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OnlineMenuButton {
-    PublicMatch,
-    HostGame,
-    JoinGame,
-    ConnectWithCode,
-    BackToMainMenu,
-    BackToOnlineMenu,
-}
-
-#[cfg(target_os = "windows")]
-pub fn copy_to_clipboard(text: &str) {
-    use std::process::Command;
-    let _ = Command::new("powershell")
-        .args(["-Command", &format!("Set-Clipboard -Value '{}'", text)])
-        .spawn();
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn copy_to_clipboard(_text: &str) {
-    // Fallback for non-windows platforms
-}
-
-pub fn generate_join_code() -> String {
-    #[cfg(target_arch = "wasm32")]
-    let seed = js_sys::Date::now() as u64;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let seed = {
-        use std::time::SystemTime;
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros() as u64
-    };
-
-    let mut x = seed;
-    x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    let code = 100000 + (x % 900000);
-    code.to_string()
-}
-
-pub fn setup_online_menu(mut commands: Commands) {
-    commands.insert_resource(ActiveJoinCodeTyping {
-        is_typing: false,
-        code: String::new(),
-    });
-}
-
-pub fn cleanup_online_menu(
-    mut commands: Commands,
-    container_q: Query<Entity, With<OnlineMenuContainer>>,
-) {
-    for entity in container_q.iter() {
-        commands.entity(entity).despawn();
-    }
-    commands.remove_resource::<ActiveJoinCodeTyping>();
-}
-
-fn spawn_online_button(
-    builder: &mut ChildSpawnerCommands,
-    label: &str,
-    button_action: OnlineMenuButton,
-    theme_color: Color,
-) {
-    builder.spawn((
-        Button,
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(44.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(1.5)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
-            margin: UiRect { top: Val::Px(8.0), ..default() },
-            ..default()
-        },
-        BorderColor::all(Color::srgb(0.2, 0.2, 0.2)),
-        BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.85)),
-        button_action,
-    )).with_children(|btn_parent| {
-        btn_parent.spawn((
-            Text::new(label),
-            TextFont {
-                font_size: 16.0,
-                ..default()
-            },
-            TextColor(theme_color),
-        ));
-    });
-}
-
-pub fn online_menu_ui_watcher(
-    mut commands: Commands,
-    typing: Res<ActiveJoinCodeTyping>,
-    container_q: Query<Entity, With<OnlineMenuContainer>>,
-    mut last_is_typing: Local<Option<bool>>,
-) {
-    let container_empty = container_q.is_empty();
-    if container_empty || last_is_typing.is_none() || last_is_typing.unwrap() != typing.is_typing {
-        *last_is_typing = Some(typing.is_typing);
-        for entity in container_q.iter() {
-            commands.entity(entity).despawn();
-        }
-        setup_online_menu_inner(&mut commands, &typing);
-    }
-}
-
-fn setup_online_menu_inner(
-    commands: &mut Commands,
-    typing: &ActiveJoinCodeTyping,
-) {
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.01, 0.01, 0.01, 0.98)),
-        OnlineMenuContainer,
-    )).with_children(|parent| {
-        if !typing.is_typing {
-            parent.spawn((
-                Text::new("ONLINE MULTIPLAYER"),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.0, 1.0, 0.5)),
-                Node {
-                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            parent.spawn((
-                Text::new("SELECT LOBBY CONFIGURATION"),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
-                Node {
-                    margin: UiRect { bottom: Val::Px(45.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            parent.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(15.0),
-                width: Val::Px(360.0),
-                ..default()
-            }).with_children(|menu_parent| {
-                spawn_online_button(menu_parent, "PUBLIC MATCHMAKING", OnlineMenuButton::PublicMatch, Color::srgb(0.0, 1.0, 0.5));
-                spawn_online_button(menu_parent, "HOST PRIVATE GAME", OnlineMenuButton::HostGame, Color::srgb(0.0, 0.83, 1.0));
-                spawn_online_button(menu_parent, "JOIN PRIVATE GAME", OnlineMenuButton::JoinGame, Color::srgb(1.0, 0.55, 0.04));
-                spawn_online_button(menu_parent, "BACK TO MAIN MENU", OnlineMenuButton::BackToMainMenu, Color::srgb(0.9, 0.2, 0.2));
-            });
-        } else {
-            parent.spawn((
-                Text::new("JOIN PRIVATE GAME"),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.55, 0.04)),
-                Node {
-                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            parent.spawn((
-                Text::new("ENTER THE 6-DIGIT ROOM CODE PROVIDED BY HOST"),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
-                Node {
-                    margin: UiRect { bottom: Val::Px(40.0), ..default() },
-                    ..default()
-                },
-            ));
-
-            parent.spawn((
-                Node {
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(10.0)),
-                    padding: UiRect::all(Val::Px(20.0)),
-                    margin: UiRect { bottom: Val::Px(30.0), ..default() },
-                    width: Val::Px(420.0),
-                    ..default()
-                },
-                BorderColor::all(Color::srgb(1.0, 0.55, 0.04)),
-                BackgroundColor(Color::srgba(0.03, 0.03, 0.03, 0.95)),
-            )).with_children(|box_parent| {
-                let mut display = String::new();
-                for i in 0..6 {
-                    if i == 3 {
-                        display.push_str(" ");
-                    }
-                    if i < typing.code.len() {
-                        display.push(typing.code.chars().nth(i).unwrap());
-                    } else {
-                        display.push('_');
-                    }
-                    if i < 5 {
-                        display.push(' ');
-                    }
-                }
-                box_parent.spawn((
-                    Text::new(display),
-                    TextFont {
-                        font_size: 48.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    JoinCodeDisplayText,
-                ));
-            });
-
-            parent.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
-                width: Val::Px(320.0),
-                ..default()
-            }).with_children(|menu_parent| {
-                spawn_online_button(menu_parent, "CONNECT TO HOST", OnlineMenuButton::ConnectWithCode, Color::srgb(0.0, 1.0, 0.5));
-                spawn_online_button(menu_parent, "BACK", OnlineMenuButton::BackToOnlineMenu, Color::srgb(0.9, 0.2, 0.2));
-            });
-        }
-    });
-}
-
-pub fn online_menu_button_system(
-    mut interaction_query: Query<
-        (&Interaction, &mut BorderColor, &mut BackgroundColor, &OnlineMenuButton),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut state: ResMut<NextState<GameState>>,
-    mut typing_res: Option<ResMut<ActiveJoinCodeTyping>>,
-    mut code_res: ResMut<crate::net::OnlineCodeResource>,
-    mut commands: Commands,
-) {
-    for (interaction, mut border, mut bg, btn) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg = BackgroundColor(Color::srgba(1.0, 0.55, 0.04, 0.35));
-                *border = BorderColor::all(Color::srgb(1.0, 0.55, 0.04));
-
-                match btn {
-                    OnlineMenuButton::PublicMatch => {
-                        code_res.code = String::new();
-                        code_res.is_host = false;
-                        state.set(GameState::Matchmaking);
-                    }
-                    OnlineMenuButton::HostGame => {
-                        let code = generate_join_code();
-                        code_res.code = code.clone();
-                        code_res.is_host = true;
-                        
-                        // Copy formatted code to clipboard
-                        let formatted_code = format!("{} {}", &code[..3], &code[3..]);
-                        copy_to_clipboard(&formatted_code);
-                        
-                        state.set(GameState::Matchmaking);
-                    }
-                    OnlineMenuButton::JoinGame => {
-                        if let Some(ref mut typing) = typing_res {
-                            typing.is_typing = true;
-                            typing.code.clear();
-                        }
-                    }
-                    OnlineMenuButton::ConnectWithCode => {
-                        if let Some(ref mut typing) = typing_res {
-                            if typing.code.len() == 6 {
-                                code_res.code = typing.code.clone();
-                                code_res.is_host = false;
-                                state.set(GameState::Matchmaking);
-                            }
-                        }
-                    }
-                    OnlineMenuButton::BackToMainMenu => {
-                        state.set(GameState::MainMenu);
-                    }
-                    OnlineMenuButton::BackToOnlineMenu => {
-                        // Disconnect Matchmaking socket if canceling
-                        commands.remove_resource::<crate::net::MatchboxSocketResource>();
-                        if let Some(ref mut typing) = typing_res {
-                            typing.is_typing = false;
-                            typing.code.clear();
-                        }
-                        state.set(GameState::OnlineMenu);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                *bg = BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.95));
-                *border = BorderColor::all(Color::srgb(1.0, 0.55, 0.04));
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.85));
-                *border = BorderColor::all(Color::srgb(0.2, 0.2, 0.2));
-            }
-        }
-    }
-}
-
-pub fn online_menu_keyboard_input_system(
-    mut events: MessageReader<KeyboardInput>,
-    mut typing: ResMut<ActiveJoinCodeTyping>,
-    mut state: ResMut<NextState<GameState>>,
-    mut code_res: ResMut<crate::net::OnlineCodeResource>,
-) {
-    if !typing.is_typing {
-        return;
-    }
-
-    for event in events.read() {
-        if event.state.is_pressed() {
-            match &event.logical_key {
-                Key::Character(c) => {
-                    // Only allow numeric digits 0-9
-                    if c.chars().all(|ch| ch.is_ascii_digit()) && typing.code.len() < 6 {
-                        typing.code.push_str(&c);
-                    }
-                }
-                Key::Backspace => {
-                    typing.code.pop();
-                }
-                Key::Enter => {
-                    if typing.code.len() == 6 {
-                        code_res.code = typing.code.clone();
-                        code_res.is_host = false;
-                        state.set(GameState::Matchmaking);
-                    }
-                }
-                Key::Escape => {
-                    typing.is_typing = false;
-                    typing.code.clear();
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-pub fn join_code_ui_sync_system(
-    typing: Res<ActiveJoinCodeTyping>,
-    mut query: Query<&mut Text, With<JoinCodeDisplayText>>,
-) {
-    if typing.is_changed() {
-        for mut text in query.iter_mut() {
-            let mut display = String::new();
-            for i in 0..6 {
-                if i == 3 {
-                    display.push_str(" ");
-                }
-                if i < typing.code.len() {
-                    display.push(typing.code.chars().nth(i).unwrap());
-                } else {
-                    display.push('_');
-                }
-                if i < 5 {
-                    display.push(' ');
-                }
-            }
-            text.0 = display;
-        }
-    }
-}
-
-pub fn setup_matchmaking_ui(
-    mut commands: Commands,
-    code_res: Option<Res<crate::net::OnlineCodeResource>>,
-) {
-    let (title_text, status_text, detail_text) = if let Some(res) = code_res {
-        if res.code.is_empty() {
-            (
-                "PUBLIC MATCHMAKING",
-                "SEARCHING FOR PEER...".to_string(),
-                "Connecting to the public matchmaking lobby.\nThe game will start automatically when a peer joins."
-            )
-        } else {
-            let raw_code = res.code.replace(" ", "");
-            let formatted_code = if raw_code.len() == 6 {
-                format!("{} {}", &raw_code[..3], &raw_code[3..])
-            } else {
-                raw_code.clone()
-            };
-
-            if res.is_host {
-                (
-                    "HOST PRIVATE GAME",
-                    format!("ROOM CODE: {}", formatted_code),
-                    "Share this code with your friend!\nThe code has been copied to your clipboard automatically."
-                )
-            } else {
-                (
-                    "JOIN PRIVATE GAME",
-                    format!("CONNECTING TO ROOM: {}", formatted_code),
-                    "Establishing handshake with Host...\nWaiting for connection to finalize."
-                )
-            }
-        }
-    } else {
-        (
-            "ONLINE MULTIPLAYER",
-            "CONNECTING...".to_string(),
-            "Initiating online multiplayer connection..."
-        )
-    };
-
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.01, 0.01, 0.01, 0.98)),
-        MatchmakingContainer,
-    )).with_children(|parent| {
-        parent.spawn((
-            Text::new(title_text),
-            TextFont {
-                font_size: 48.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.0, 1.0, 0.5)),
-            Node {
-                margin: UiRect { bottom: Val::Px(15.0), ..default() },
-                ..default()
-            },
-        ));
-
-        parent.spawn((
-            Text::new(status_text),
-            TextFont {
-                font_size: 32.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Node {
-                margin: UiRect { bottom: Val::Px(20.0), ..default() },
-                ..default()
-            },
-        ));
-
-        parent.spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(20.0)),
-                border: UiRect::all(Val::Px(1.5)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                width: Val::Px(550.0),
-                margin: UiRect { bottom: Val::Px(20.0), ..default() },
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.2, 0.2, 0.2)),
-            BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.95)),
-        )).with_children(|box_parent| {
-            box_parent.spawn((
-                Text::new(detail_text),
-                TextFont {
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            ));
-        });
-
-        // Cancel Button Box
-        parent.spawn(Node {
-            width: Val::Px(280.0),
-            ..default()
-        }).with_children(|cancel_parent| {
-            spawn_online_button(cancel_parent, "CANCEL MATCHMAKING", OnlineMenuButton::BackToOnlineMenu, Color::srgb(0.9, 0.2, 0.2));
-        });
-    });
-}
-
-pub fn cleanup_matchmaking_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<MatchmakingContainer>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
 }

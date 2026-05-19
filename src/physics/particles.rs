@@ -28,22 +28,16 @@ pub struct ExplosionRecordComponent {
 
 // --- COLOR TEMPERATURE SHIFTING HELPER ---
 pub fn get_tiered_color(base_color: Color, damage: f32) -> Color {
-    if damage < 25.0 {
-        base_color
-    } else if damage < 55.0 {
-        // High Damage: Vibrant Neon Cyan (P1 Blue) or Molten Gold (P2 Orange)
-        let is_orange = base_color.to_srgba().red > 0.4;
-        if is_orange {
-            Color::srgb(1.0, 0.85, 0.0) // Molten Gold
-        } else {
-            Color::srgb(0.0, 0.95, 1.0) // Vibrant Neon Cyan
-        }
-    } else if damage < 90.0 {
-        // Extreme Damage: Volatile Plasma Magenta
-        Color::srgb(0.95, 0.0, 0.8) // Plasma Magenta
+    let is_poison = base_color.to_srgba().green > 0.8 && base_color.to_srgba().red < 0.4;
+    if is_poison {
+        return base_color;
+    }
+    if damage < 30.0 {
+        Color::srgb(1.0, 0.5, 0.0) // Fiery Orange
+    } else if damage < 70.0 {
+        Color::srgb(1.0, 0.85, 0.0) // Molten Gold/Yellow
     } else {
-        // Cosmic Damage: Glowing Celestial Neon Violet
-        Color::srgb(0.6, 0.0, 1.0) // Cosmic Neon Violet
+        Color::srgb(1.0, 0.95, 0.98) // White-hot
     }
 }
 
@@ -153,23 +147,38 @@ pub fn spawn_spark_burst(
     count: usize,
     seed_offset: u32,
 ) {
-    // Seed using player positions and offset variables
     let mut rng = SimpleRng::new(
         (pos.x.abs() as u32)
             .wrapping_add((pos.y.abs() as u32).wrapping_mul(1000))
             .wrapping_add(seed_offset),
     );
 
-    for _ in 0..count {
+    let is_poison = color.to_srgba().green > 0.8 && color.to_srgba().red < 0.4;
+
+    for i in 0..count {
         let angle = rng.range(0.0, std::f32::consts::TAU);
         let speed = rng.range(120.0, 360.0);
         let size = rng.range(1.5, 3.5);
         let lifetime = rng.range(0.2, 0.4);
 
+        let final_color = if is_poison {
+            color
+        } else {
+            let mut p_rng = SimpleRng::new(seed_offset.wrapping_add(i as u32 * 19));
+            let r_val = p_rng.next_f32();
+            if r_val > 0.6 {
+                Color::WHITE
+            } else if r_val > 0.25 {
+                Color::srgb(1.0, 0.5, 0.0) // fiery orange
+            } else {
+                Color::srgb(1.0, 0.85, 0.0) // hot yellow
+            }
+        };
+
         commands.spawn((
             Particle {
                 velocity: Vec2::new(angle.cos() * speed, angle.sin() * speed),
-                color,
+                color: final_color,
                 size,
                 lifetime,
                 max_lifetime: lifetime,
@@ -181,7 +190,7 @@ pub fn spawn_spark_burst(
     commands.spawn(ExplosionRecordComponent { pos, color, damage: -1.0 });
 }
 
-// --- DYNAMIC TRAILS SPAWNER (SCALES BY TIRED DAMAGE COLOR, TEARDROP FOR METEOR) ---
+// --- DYNAMIC TRAILS SPAWNER (SCALES BY DAMAGE AND PALETTE) ---
 pub fn spawn_trail_particle(
     commands: &mut Commands,
     pos: Vec2,
@@ -190,24 +199,15 @@ pub fn spawn_trail_particle(
     bullet_velocity: Vec2,
     seed_offset: u32,
 ) {
-    let mut rng = SimpleRng::new(
-        (pos.x.abs() as u32)
-            .wrapping_add((pos.y.abs() as u32).wrapping_mul(1000))
-            .wrapping_add(seed_offset),
-    );
+    let is_poison = color.to_srgba().green > 0.8 && color.to_srgba().red < 0.4;
 
-    // Apply tiered energy colors based on damage!
-    let final_color = get_tiered_color(color, damage);
-
-    if damage >= 90.0 {
+    if damage >= 70.0 {
         // --- HIGH-DENSITY TEARDROP METEOR TRAIL ---
-        // Spawn 3 particles per frame distributed wide and drifting inwards to create a perfect teardrop comets tail!
         let forward = bullet_velocity.normalize_or_zero();
         let right = Vec2::new(-forward.y, forward.x);
-        // Estimate bullet radius for spread
         let radius = damage.sqrt() * 1.5; 
 
-        for i in 0..3 {
+        for i in 0..4 {
             let mut particle_rng = SimpleRng::new(
                 (pos.x.abs() as u32)
                     .wrapping_add((pos.y.abs() as u32).wrapping_mul(1000))
@@ -216,18 +216,75 @@ pub fn spawn_trail_particle(
             );
             
             let spread_pct = particle_rng.range(-1.0, 1.0);
-            // Spawn spread wide perpendicular to movement
-            let spawn_offset = right * (spread_pct * radius);
+            let spawn_offset = right * (spread_pct * radius * 0.7);
 
             // Velocity: drift backward AND pull inwards towards the center tail line!
-            let drift = -bullet_velocity * particle_rng.range(0.08, 0.18);
+            let drift = -bullet_velocity * particle_rng.range(0.08, 0.20);
             let inward_dir = -right * (spread_pct * particle_rng.range(80.0, 140.0));
             let velocity = drift + inward_dir;
 
-            // Size: central particles are thick, outer particles are tapered and thin
-            let size = particle_rng.range(0.8, 1.8) * (1.0 - spread_pct.abs() * 0.4);
-            // Lifetime: central particles trail longer, outer particles burn out quickly
-            let lifetime = particle_rng.range(0.20, 0.40) * (1.0 - spread_pct.abs() * 0.5);
+            let size = particle_rng.range(1.0, 2.5) * (1.0 - spread_pct.abs() * 0.4);
+            let lifetime = particle_rng.range(0.20, 0.45) * (1.0 - spread_pct.abs() * 0.5);
+
+            let final_color = if is_poison {
+                color
+            } else {
+                let rand_val = particle_rng.next_f32();
+                if rand_val > 0.6 {
+                    Color::WHITE // white-hot
+                } else if rand_val > 0.2 {
+                    Color::srgb(1.0, 0.45, 0.0) // fiery orange
+                } else {
+                    Color::srgb(1.0, 0.85, 0.0) // hot yellow
+                }
+            };
+
+            commands.spawn((
+                Particle {
+                    velocity,
+                    color: final_color,
+                    size,
+                    lifetime,
+                    max_lifetime: lifetime,
+                    particle_type: ParticleType::StandardSpark,
+                },
+                Transform::from_xyz(pos.x + spawn_offset.x, pos.y + spawn_offset.y, 8.0),
+            ));
+        }
+    } else if damage >= 30.0 {
+        // --- MEDIUM DENSITY TRAIL ---
+        let forward = bullet_velocity.normalize_or_zero();
+        let right = Vec2::new(-forward.y, forward.x);
+        let radius = damage.sqrt() * 1.2;
+
+        for i in 0..2 {
+            let mut particle_rng = SimpleRng::new(
+                (pos.x.abs() as u32)
+                    .wrapping_add((pos.y.abs() as u32).wrapping_mul(1000))
+                    .wrapping_add(seed_offset)
+                    .wrapping_add(i as u32 * 123),
+            );
+            
+            let spread_pct = particle_rng.range(-0.8, 0.8);
+            let spawn_offset = right * (spread_pct * radius * 0.5);
+            let drift = -bullet_velocity * particle_rng.range(0.08, 0.15);
+            let velocity = drift;
+
+            let size = particle_rng.range(0.8, 1.8);
+            let lifetime = particle_rng.range(0.18, 0.35);
+
+            let final_color = if is_poison {
+                color
+            } else {
+                let rand_val = particle_rng.next_f32();
+                if rand_val > 0.75 {
+                    Color::WHITE // white-hot spark
+                } else if rand_val > 0.25 {
+                    Color::srgb(1.0, 0.5, 0.0) // fiery orange
+                } else {
+                    Color::srgb(1.0, 0.85, 0.0) // hot yellow
+                }
+            };
 
             commands.spawn((
                 Particle {
@@ -242,16 +299,29 @@ pub fn spawn_trail_particle(
             ));
         }
     } else {
-        // --- STANDARD BULLET TRAIL ---
-        // Trail velocity opposes bullet velocity with slight scatter
-        let angle = rng.range(0.0, std::f32::consts::TAU);
-        let scatter_speed = rng.range(15.0, 60.0);
-        let drift = -bullet_velocity * 0.12;
+        // --- LOW DAMAGE TRAIL ---
+        let mut particle_rng = SimpleRng::new(
+            (pos.x.abs() as u32)
+                .wrapping_add((pos.y.abs() as u32).wrapping_mul(1000))
+                .wrapping_add(seed_offset),
+        );
+        let angle = particle_rng.range(0.0, std::f32::consts::TAU);
+        let scatter_speed = particle_rng.range(10.0, 30.0);
+        let drift = -bullet_velocity * 0.10;
         let velocity = drift + Vec2::new(angle.cos() * scatter_speed, angle.sin() * scatter_speed);
 
-        // Size does NOT inflate: cap individual sizes at standard small trail values
-        let size = rng.range(0.5, 1.2);
-        let lifetime = rng.range(0.15, 0.35);
+        let size = particle_rng.range(0.5, 1.0);
+        let lifetime = particle_rng.range(0.12, 0.25);
+
+        let final_color = if is_poison {
+            color
+        } else {
+            if particle_rng.next_f32() > 0.3 {
+                Color::srgb(1.0, 0.55, 0.0) // orange
+            } else {
+                Color::srgb(1.0, 0.88, 0.0) // yellow
+            }
+        };
 
         commands.spawn((
             Particle {
@@ -267,7 +337,7 @@ pub fn spawn_trail_particle(
     }
 }
 
-// --- DYNAMIC LANDING EXPLOSION SPAWNER (SCALES BY TIERS, INJECTS BEAMS & SHOCKWAVES) ---
+// --- DYNAMIC LANDING EXPLOSION SPAWNER ---
 pub fn spawn_damage_explosion(
     commands: &mut Commands,
     pos: Vec2,
@@ -281,7 +351,7 @@ pub fn spawn_damage_explosion(
             .wrapping_add(seed_offset),
     );
 
-    // Apply tiered energy colors based on damage!
+    let is_poison = color.to_srgba().green > 0.8 && color.to_srgba().red < 0.4;
     let final_color = get_tiered_color(color, damage);
 
     // Estimate bullet physical radius to scatter sparks across its exact body volume
@@ -289,25 +359,36 @@ pub fn spawn_damage_explosion(
 
     // 1. Spawning Standard Sparks (Distributed uniformly inside the bullet volume)
     let size_factor = damage.sqrt();
-    let count = (size_factor * 2.5 + 8.0).round() as usize; // slightly increased count for dense meteor impacts
+    let count = (size_factor * 3.0 + 8.0).round() as usize;
 
     for i in 0..count {
         let angle = rng.range(0.0, std::f32::consts::TAU);
         let speed = rng.range(80.0, 260.0) * size_factor.clamp(1.0, 2.5);
-        // Cap spark size between 0.8 and 2.5 max
         let size = rng.range(0.8, 2.0).min(2.5);
         let lifetime = rng.range(0.25, 0.50);
 
-        // Scatter starting positions uniformly inside the bullet circle!
         let mut particle_rng = SimpleRng::new(seed_offset.wrapping_add(i as u32 * 33));
         let spread_angle = particle_rng.range(0.0, std::f32::consts::TAU);
         let spread_radius = particle_rng.range(0.0, bullet_radius);
         let spawn_pos = pos + Vec2::new(spread_angle.cos() * spread_radius, spread_angle.sin() * spread_radius);
 
+        let spark_color = if is_poison {
+            color
+        } else {
+            let rand_val = particle_rng.next_f32();
+            if rand_val > 0.6 {
+                Color::WHITE
+            } else if rand_val > 0.25 {
+                Color::srgb(1.0, 0.45, 0.0) // fiery orange
+            } else {
+                Color::srgb(1.0, 0.85, 0.0) // hot yellow
+            }
+        };
+
         commands.spawn((
             Particle {
                 velocity: Vec2::new(angle.cos() * speed, angle.sin() * speed),
-                color: final_color,
+                color: spark_color,
                 size,
                 lifetime,
                 max_lifetime: lifetime,
@@ -317,7 +398,7 @@ pub fn spawn_damage_explosion(
         ));
     }
 
-    // 2. Procedural Light Beams (Laser Spikes offset from within the bullet body)
+    // 2. Procedural Light Beams
     if damage >= 25.0 {
         let beam_count = if damage < 55.0 {
             rng.range(4.0, 6.0).round() as usize
@@ -335,13 +416,19 @@ pub fn spawn_damage_explosion(
             rng.range(120.0, 150.0)
         };
 
+        let beam_color = if is_poison {
+            Color::srgb(0.2, 0.9, 0.2)
+        } else if damage >= 70.0 {
+            Color::WHITE
+        } else {
+            Color::srgb(1.0, 0.5, 0.0)
+        };
+
         for i in 0..beam_count {
-            // Evenly distribute beam angles with slight random jitter
             let base_angle = (i as f32 / beam_count as f32) * std::f32::consts::TAU;
             let angle = base_angle + rng.range(-0.15, 0.15);
             let direction = Vec2::new(angle.cos(), angle.sin());
 
-            // Set higher damage beams to rotate slowly
             let rotation_speed = if damage >= 55.0 {
                 rng.range(-2.0, 2.0)
             } else {
@@ -349,16 +436,14 @@ pub fn spawn_damage_explosion(
             };
 
             let lifetime = rng.range(0.12, 0.22);
-
-            // Offset the beam origin from within the bullet body
             let beam_offset = direction * rng.range(0.0, bullet_radius * 0.5);
             let spawn_pos = pos + beam_offset;
 
             commands.spawn((
                 Particle {
-                    velocity: Vec2::ZERO, // Beams are fixed at impact point
-                    color: final_color,
-                    size: 1.0, // Fixed thickness
+                    velocity: Vec2::ZERO,
+                    color: beam_color,
+                    size: 1.0,
                     lifetime,
                     max_lifetime: lifetime,
                     particle_type: ParticleType::LightBeam {
@@ -372,7 +457,7 @@ pub fn spawn_damage_explosion(
         }
     }
 
-    // 3. Expanding Shockwave Ring Distortion (Starts exactly at the bullet edge!)
+    // 3. Expanding Shockwave Ring Distortion
     if damage >= 40.0 {
         let min_radius = bullet_radius;
         let max_radius = bullet_radius + if damage < 90.0 {
@@ -383,10 +468,18 @@ pub fn spawn_damage_explosion(
 
         let lifetime = rng.range(0.14, 0.24);
 
+        let shock_color = if is_poison {
+            Color::srgb(0.2, 0.9, 0.2)
+        } else if damage >= 70.0 {
+            Color::WHITE
+        } else {
+            Color::srgb(1.0, 0.5, 0.0)
+        };
+
          commands.spawn((
             Particle {
-                velocity: Vec2::ZERO, // Shockwave is fixed at impact point
-                color: final_color,
+                velocity: Vec2::ZERO,
+                color: shock_color,
                 size: 1.0,
                 lifetime,
                 max_lifetime: lifetime,

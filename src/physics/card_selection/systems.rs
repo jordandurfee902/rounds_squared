@@ -2,89 +2,7 @@ use bevy::prelude::*;
 use crate::player::{Player, Health};
 use crate::physics::weapon::Projectile;
 use crate::settings::{GameState, PersistentPlayerStats};
-
-pub struct CardSelectionPlugin;
-
-impl Plugin for CardSelectionPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, check_player_death.run_if(in_state(GameState::Gameplay).and(crate::physics::is_not_paused).and(resource_equals(crate::net::IsNetworked(false)))))
-           .add_systems(OnEnter(GameState::CardSelection), setup_card_selection)
-           .add_systems(OnExit(GameState::CardSelection), cleanup_card_selection)
-           .add_systems(Update, (
-               card_selection_input.run_if(resource_equals(crate::net::IsNetworked(false))),
-               draw_card_gizmos,
-           ).run_if(in_state(GameState::CardSelection)));
-    }
-}
-
-#[derive(Resource, Debug, Clone)]
-pub struct CardSelectionState {
-    pub selected_idx: usize,
-    pub selecting_player: Player,
-}
-
-#[derive(Component, Debug, Clone)]
-pub struct CardSelectionUiComponent {
-    pub index: usize,
-}
-
-#[derive(Component, Debug, Clone)]
-pub struct SelectionHeaderComponent;
-
-#[derive(Debug, Clone)]
-pub struct CardDef {
-    pub name: &'static str,
-    pub desc: &'static str,
-    pub stat_lines: &'static [&'static str],
-}
-
-pub const CARDS: [CardDef; 5] = [
-    CardDef {
-        name: "Fast & Light",
-        desc: "Trade durability\nfor extreme speed!",
-        stat_lines: &[
-            "+30% Movement Speed",
-            "-20% Max Health",
-        ],
-    },
-    CardDef {
-        name: "Tanky Giant",
-        desc: "Grow massive and\nabsorb heavy hits.",
-        stat_lines: &[
-            "+40% Max Health",
-            "+30% Player Scale",
-            "-15% Jump Force",
-        ],
-    },
-    CardDef {
-        name: "Hyper-Shot",
-        desc: "Fast-travel high\nvelocity bullet rounds.",
-        stat_lines: &[
-            "+35% Bullet Speed",
-            "+20% Bullet Damage",
-            "-1 Max Ammo",
-        ],
-    },
-    CardDef {
-        name: "Toxic Spray",
-        desc: "Infect opponents with\nneon poison clouds.",
-        stat_lines: &[
-            "Adds Poison Trail effect",
-            "+0.15 Bullet Growth",
-            "+2 Max Ammo",
-        ],
-    },
-    CardDef {
-        name: "Heavy Artillery",
-        desc: "Slow, massive,\nhigh-gravity warheads.",
-        stat_lines: &[
-            "+80% Bullet Damage",
-            "+30% Bullet Size Mult",
-            "+200 Downward Gravity",
-            "+1.0s Reload Time",
-        ],
-    },
-];
+use super::defs::*;
 
 pub fn check_player_death(
     mut commands: Commands,
@@ -149,10 +67,22 @@ pub fn check_player_death(
             commands.entity(particle_entity).despawn();
         }
 
+        // Draw 5 unique random card indices
+        let mut drawn = [0; 5];
+        let mut available: Vec<usize> = (0..super::cards::TOTAL_CARDS_COUNT).collect();
+        for i in 0..5 {
+            if available.is_empty() {
+                break;
+            }
+            let idx = (rollback_rng.next_f32() * available.len() as f32) as usize;
+            drawn[i] = available.remove(idx);
+        }
+
         // Dead player gets to choose a card!
         commands.insert_resource(CardSelectionState {
             selected_idx: 2, // highlight middle card by default
             selecting_player: player_who_died,
+            drawn_cards: drawn,
         });
 
         // Open the Card Selection UI
@@ -160,7 +90,7 @@ pub fn check_player_death(
     }
 }
 
-fn setup_card_selection(
+pub fn setup_card_selection(
     mut commands: Commands,
     state: Res<CardSelectionState>,
 ) {
@@ -201,7 +131,8 @@ fn setup_card_selection(
 
     // Spawn 5 Card Nodes
     for i in 0..5 {
-        let card_def = &CARDS[i];
+        let card_idx = state.drawn_cards[i];
+        let card_def = super::cards::get_card(card_idx).unwrap();
         let x_pos = x_offsets[i];
 
         // Apply a highly responsive arched hand layout, rotating OUTWARDS like a fan
@@ -216,7 +147,7 @@ fn setup_card_selection(
         )).with_children(|parent| {
             // Title Text
             parent.spawn((
-                Text2d::new(card_def.name),
+                Text2d::new(card_def.name()),
                 TextFont {
                     font_size: 42.0,
                     ..default()
@@ -227,7 +158,7 @@ fn setup_card_selection(
 
             // Description Text
             parent.spawn((
-                Text2d::new(card_def.desc),
+                Text2d::new(card_def.desc()),
                 TextFont {
                     font_size: 24.0,
                     ..default()
@@ -237,7 +168,7 @@ fn setup_card_selection(
             ));
 
             // Stat Modifications lines
-            for (stat_idx, stat_line) in card_def.stat_lines.iter().enumerate() {
+            for (stat_idx, stat_line) in card_def.stat_lines().iter().enumerate() {
                 let y_pos = -30.0 - (stat_idx as f32 * 55.0);
                 let text_color = if stat_line.starts_with('+') || stat_line.contains("Adds") {
                     Color::srgb(0.3, 0.9, 0.3) // Glowing neon green for buffs!
@@ -259,7 +190,7 @@ fn setup_card_selection(
     }
 }
 
-fn cleanup_card_selection(
+pub fn cleanup_card_selection(
     mut commands: Commands,
     ui_nodes: Query<Entity, Or<(With<CardSelectionUiComponent>, With<SelectionHeaderComponent>)>>,
 ) {
@@ -268,7 +199,7 @@ fn cleanup_card_selection(
     }
 }
 
-fn draw_card_gizmos(
+pub fn draw_card_gizmos(
     mut gizmos: Gizmos,
     state: Res<CardSelectionState>,
     query: Query<(&Transform, &CardSelectionUiComponent)>,
@@ -297,7 +228,7 @@ fn draw_card_gizmos(
 }
 
 /// Sweeps 4 rotated line segments manually to achieve gorgeous rotatable card borders.
-fn draw_rotated_rect(
+pub fn draw_rotated_rect(
     gizmos: &mut Gizmos,
     center: Vec2,
     size: Vec2,
@@ -332,7 +263,7 @@ fn draw_rotated_rect(
     gizmos.line_2d(p4, p1, color);
 }
 
-fn card_selection_input(
+pub fn card_selection_input(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
     lobby_slots: Res<crate::settings::LobbySlots>,
@@ -418,37 +349,11 @@ fn card_selection_input(
             Player::P2 => &mut persistent_stats.p2,
         };
 
-        p_stats.cards.push(state.selected_idx);
+        let card_idx = state.drawn_cards[state.selected_idx];
+        p_stats.cards.push(card_idx);
 
-        match state.selected_idx {
-            0 => { // Fast & Light
-                p_stats.movement_speed *= 1.30;
-                p_stats.health_max *= 0.80;
-            }
-            1 => { // Tanky Giant
-                p_stats.health_max *= 1.40;
-                p_stats.player_scale *= 1.30;
-                p_stats.jump_force *= 0.85;
-            }
-            2 => { // Hyper-Shot
-                p_stats.bullet_speed *= 1.35;
-                p_stats.bullet_damage *= 1.20;
-                p_stats.max_ammo = p_stats.max_ammo.saturating_sub(1).max(1);
-            }
-            3 => { // Toxic Spray
-                if !p_stats.special_effects.contains(&"PoisonCloud".to_string()) {
-                    p_stats.special_effects.push("PoisonCloud".to_string());
-                }
-                p_stats.bullet_growth += 0.15;
-                p_stats.max_ammo += 2;
-            }
-            4 => { // Heavy Artillery
-                p_stats.bullet_damage *= 1.80;
-                p_stats.bullet_size_mult *= 1.30;
-                p_stats.bullet_gravity += 200.0;
-                p_stats.reload_time += 1.0;
-            }
-            _ => {}
+        if let Some(card) = super::cards::get_card(card_idx) {
+            card.apply(p_stats);
         }
 
         // Return to round gameplay

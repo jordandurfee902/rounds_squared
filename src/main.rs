@@ -34,6 +34,7 @@ fn main() {
         .insert_resource(net::IsNetworked(false))
         .insert_resource(net::LocalPlayerIndex(0))
         .insert_resource(net::RollbackRng::new(98765))
+        .insert_resource(graphics::ScreenShake::default())
         .add_systems(Startup, (setup_camera, maximize_window))
         .add_systems(OnEnter(GameState::Matchmaking), net::start_matchmaking)
         .add_systems(Update, net::lobby_system.run_if(in_state(GameState::Matchmaking)))

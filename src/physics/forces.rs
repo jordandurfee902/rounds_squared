@@ -19,7 +19,7 @@ pub fn apply_gravity_and_movement(
         let mut gravity_accel = settings.gravity * mass.0;
 
         // Fast Falling: pressing down (fast_fall) increases downward velocity significantly
-        if input.fast_fall && velocity.0.y < 50.0 {
+        if input.fast_fall && velocity.0.y < settings.fast_fall_velocity_limit {
             gravity_accel += -settings.fast_fall_acceleration;
         }
 
@@ -28,7 +28,7 @@ pub fn apply_gravity_and_movement(
         // Wall Cling: pushing into a vertical surface slows descent
         // Only clings when moving downwards (falling)
         if velocity.0.y < 0.0 {
-            if (wall.left && input.move_dir < -0.1) || (wall.right && input.move_dir > 0.1) {
+            if (wall.left && input.move_dir < -settings.wall_cling_stick_threshold) || (wall.right && input.move_dir > settings.wall_cling_stick_threshold) {
                 if velocity.0.y < -settings.wall_slide_speed {
                     velocity.0.y = -settings.wall_slide_speed;
                 }
@@ -46,7 +46,7 @@ pub fn player_movement(
     for (mut velocity, grounded, wall, input, stats, block, mut jump_allowance) in query.iter_mut() {
         // Reset jump allowance when on the ground or in contact with a wall/pillar
         if grounded.0 || wall.left || wall.right {
-            jump_allowance.value = 1;
+            jump_allowance.value = settings.max_jump_allowance;
         }
 
         // Force horizontal inputs to 0.0 if a wall knockback or block deflect launch is active

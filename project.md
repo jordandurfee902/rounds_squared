@@ -28,7 +28,7 @@ stateDiagram-v2
 ---
 
 ## 🌐 Authoritative Host-Client Multiplayer Architecture
-File: `src/net.rs`
+Files: `src/net/`
 
 SETS uses an **Authoritative Host-Client** network architecture designed to ensure zero physics desynchronizations. Instead of distributed simulation (Rollback/P2P), we designate the Host computer as the single source of truth, while the Client acts as a clean rendering terminal.
 
@@ -64,14 +64,14 @@ sequenceDiagram
 ### 2. Network State Replication & Serialization
 Instead of speculating on local frames, the network loop strictly synchronizes components every frame:
 *   **Client to Host (`ClientInputPacket`)**: Sends P2's moving directions, jumping states, fast fall triggers, weapon firings, block activations, manual reloads, aim direction vectors, card menu selections, and ready flags.
-*   **Host to Client (`HostStatePacket`)**: Sends the absolute frame count, lobby slots, current map index, card selection states (active index, selected index), player status (P1 and P2 positions, velocities, health, blocking timers, ammunition counts, reload progress, and grounded states), and dynamic arrays of all active projectile/particle locations.
+*   **Host to Client (`HostStatePacket`)**: Sends the absolute frame count, lobby slots, current map index, card selection states (active index, selected index, host-drawn indices), active gravity wells, player status (P1 and P2 positions, velocities, health, blocking timers, ammunition counts, reload progress, and grounded states), dynamic arrays of active projectiles/explosions, and currently selected player cards list (`p1_cards` and `p2_cards`).
 *   **Client Component Overwrites**: On receipt of `HostStatePacket`, the Client directly overwrites its local entities with Host positions and velocities. **The Client runs zero physics simulation queries locally**, completely eliminating desynchronization.
 
 ---
 
 ## 🪲 Network & Visual Bugs Smashed
 
-During the engineering of the Host-Client online network layer, we encountered and successfully resolved several critical visual and synchronization bugs:
+During development, we encountered and successfully resolved several critical visual and synchronization bugs:
 
 ### 1. Lobby Input Flashing & Device Setup
 *   **The Bug**: During device pairing, if a keyboard or controller was tapped, the selection page flashed repeatedly, resulting in corrupt characters rendering or gameplay input loops colliding.
@@ -101,6 +101,18 @@ During the engineering of the Host-Client online network layer, we encountered a
 *   **Cause**: At the start of the physics block, `reset_collision_states` resets `Grounded` to `false` before `player_platform_collision` resolves it to `true`. Without explicit ordering, Bevy scheduled the visual `update_and_draw_legs` system to run *after* the reset but *before* the platform check, making the player look airborne every frame.
 *   **Fix**: Ordered the entire noodle-drawing visual block to run explicitly `.after(player_platform_collision)`. This ensures that visual animations only resolve once grounding states are stable for the current frame.
 
+### 7. Procedural Legs Floating & Bad Attachment
+*   **The Bug**: Character legs floated above the platforms on game start until moving, or extended/stretched down to the bottom boundary when in mid-air.
+*   **Fix**: Implemented a platform Y-level lookup that snaps leg anchors to the platform currently touched by the player's body radius, reducing flailing and keeping feet perfectly flat on walking surfaces.
+
+### 8. Bevy ECS Parameter Borrow Conflicts (Error B0001)
+*   **The Bug**: Compiling or launching the game with new queries caused Bevy to panic at startup due to overlaps between mutable player transform borrows and immutable gravity well transform queries.
+*   **Fix**: Applied explicit `Without<Player>` filters on non-player queries accessing transforms, proving to the compiler that the queries are disjoint.
+
+### 9. Client Card UI and Settings Menus Out of Sync
+*   **The Bug**: In online play, the client computer didn't display the top-right card list, and pause settings UI did not update character stats after choosing cards.
+*   **Fix**: Replicated `p1_cards` and `p2_cards` lists inside the host state packets, prompting the client to dynamically re-evaluate and rebuild player stats from baseline settings and active card traits.
+
 ---
 
 ## 🛠️ Guidelines for Implementing Multiplayer Compatible Features
@@ -113,7 +125,7 @@ To maintain 100% network synchronization and prevent desyncs when implementing f
 
 ### 2. How to Add a New Player Stat or Component (e.g. Shield Capacity, Speed Buff)
 If you add a new component that affects gameplay:
-1.  **Add to Packet**: Add the new data field (e.g. `shield_charge: f32`) to the `PlayerNetState` struct inside `src/net.rs`.
+1.  **Add to Packet**: Add the new data field (e.g. `shield_charge: f32`) to the `PlayerNetState` struct inside `src/net/protocol.rs`.
 2.  **Host Packages It**: In `host_network_system`, extract the player's component value and populate it in `PlayerNetState`.
     ```rust
     // In host_network_system:
@@ -134,7 +146,7 @@ If you add a new component that affects gameplay:
 Clients must **never** spawn gameplay-active entities locally. Doing so splits the physical world:
 1.  **Host Spawns Authoritatively**: The Host spawns the entity with physical coordinates, velocities, and identifiers.
 2.  **Serialize inside State**: Include an array or list of these entities inside `HostStatePacket` (e.g. `pub traps: Vec<TrapNetState>`).
-3.  **Client Spawns Dummy/Visual Counterparts**: The Client reads the list, compares it to local dummy entities, spawns corresponding visual entities if new, updates positions of existing ones, and despawns any that are no longer present in the packet. (Refer to how `Projectile` arrays are synced in `src/net.rs`).
+3.  **Client Spawns Dummy/Visual Counterparts**: The Client reads the list, compares it to local dummy entities, spawns corresponding visual entities if new, updates positions of existing ones, and despawns any that are no longer present in the packet. (Refer to how `Projectile` arrays are synced in `src/net/client.rs`).
 
 ### 4. Deterministic RNG
 If a card or weapon uses random numbers (e.g., shotgun pellet spread, random bounce directions):
@@ -170,7 +182,7 @@ If a player blocks (`BlockComponent::active_timer > 0.0`) upon hitting a border,
 ---
 
 ### 2. Weapon Dynamics & Border Bullet Exemption
-File: `src/physics/weapon.rs`
+File: `src/physics/weapon/`
 
 Weapons fire customizable projectiles that scale according to active card modifiers (`bullet_speed`, `bullet_damage`, `bullet_size_mult`, `bullet_growth`).
 
@@ -185,10 +197,14 @@ When entering `GameState::CardSelection`, the cleanup system sweeps and despawns
 *   All active particle effects (`Particle` component).
 *   All poison clouds (`PoisonCloud` component).
 
+#### **C. Camera Screen Shake**
+*   **Trigger:** When a bullet lands dealing over `100.0` damage, a global screen shake triggers.
+*   **Scaling:** Screen shake intensity and duration scale with `sqrt(damage)`, capped at `35.0` pixels and `0.45` seconds to maintain gameplay readability.
+
 ---
 
 ### 3. Top-Left Dynamic Score UI
-File: `src/physics/anim.rs`
+File: `src/physics/anim/legs.rs` (shared visual draw loop)
 
 The score UI acts as an overhead HUD displaying round scores point-by-point.
 
@@ -203,7 +219,7 @@ The score UI acts as an overhead HUD displaying round scores point-by-point.
 ---
 
 ### 4. Gamepad & Controller Input System
-Files: `src/player.rs`, `src/physics/weapon.rs`, `src/physics/anim.rs`, `src/physics/card_selection.rs`
+Files: `src/player/`, `src/physics/weapon/`, `src/physics/anim/`, `src/physics/card_selection/`
 
 A primary connected Bevy `Gamepad` maps full, tactile physical controller inputs for Player 2, falling back dynamically to standard keyboard inputs if no controller is detected.
 
@@ -245,21 +261,78 @@ The level builder has been completely modularized. Maps are loaded dynamically u
 
 ---
 
+### 6. Decoupled Card System Registry
+Files: `src/physics/card_selection/`
+
+The card system uses a fully modularized Trait pattern where each card is defined in its own file under `cards/`. A global lookup `get_card(usize)` mapping matches indices to zero-cost references.
+
+#### **The 10 Unique Modifier Cards:**
+1.  **Fast & Light**: +30% Movement Speed, -20% Block Cooldown.
+2.  **Tanky Giant**: +50% Player Scale, +100% Health, -20% Speed.
+3.  **Hyper-Shot**: +100% Bullet Speed, -30% Reload Time, -20% Damage.
+4.  **Toxic Spray**: Adds `PoisonCloud` effect to bullets, +1 Bounce, +50% Fire Rate Cooldown.
+5.  **Heavy Artillery**: +200% Bullet Size, +80% Damage, -40% Fire Rate, -30% Speed.
+6.  **Glass Cannon**: +100% Damage, -50% Max HP.
+7.  **Bullet Hell**: +100% Ammo, -50% Fire Rate Cooldown, -30% Damage.
+8.  **Rubber Bullets**: +3 Bounces, +30% Bounce Speed Retention.
+9.  **Vampire**: +25% Shield Duration, -20% Shield Cooldown.
+10. **Gravity Vortex**: -20% Bullet Speed; spawns a swirling gravity vortex on bullet impact pulling players in.
+
+---
+
 ## 🗃️ Active Source Code File Reference
 
 ### Main & Initialization
-*   `src/main.rs`: Orchestrates the app launch, camera systems, window configurations, and GGRS rollback registrations.
+*   `src/main.rs`: Orchestrates the app launch, camera systems, window configurations, and network system registrations.
 *   `src/settings.rs`: Defines character statistics, active game state, input device enums, score resources, and auto-generated launch configurations.
 *   `src/player.rs`: Manages keyboard/controller key bindings, player collision hitboxes, block deflect bounds, and player spawning layouts.
-*   `src/graphics.rs`: Sets absolute viewport coordinates and procedural HUD details.
+*   `src/graphics.rs`: Sets absolute viewport coordinates, camera properties, and camera screen shake trigonometric calculation systems.
 *   `src/map.rs`: Constructs platform shapes and compiles dynamic map layouts.
-*   `src/net.rs`: **[NEW]** Handles local Matchbox matchmaking connection, unreliable WebRTC channels, GGRS input pack/unpack system, `RollbackRng` determinism, and GGRS menu synchronization.
+
+### Networking & Replication (`src/net/`)
+*   `mod.rs`: Performs initialization and high-level configuration.
+*   `client.rs`: Runs client replication logic, deserializing state packets, mapping visuals, and capturing/sending local inputs.
+*   `host.rs`: Performs host-authoritative simulation, processes inputs, handles card applications, and broadcasts state packets.
+*   `protocol.rs`: Defines serialization-compatible packet structures (`HostStatePacket`, `ClientInputPacket`, `PlayerNetState`, `BulletNetState`, `PoisonCloudNetState`, `ExplosionEvent`, `GravityWellNetState`).
+*   `matchmaking.rs`: Manages peer connections and alphabetically establishes host/client indexes.
+*   `rng.rs`: Defines rollback-safe deterministic RNG utilities.
 
 ### Custom Physics Engine (`src/physics/`)
 *   `components.rs`: Defines physics values (`Velocity`, `Mass`, `Grounded`, `WallContact`, `ControllerInput`, `PlayerAim`, `JumpAllowance`).
 *   `collision.rs`: Processes elastic circle-to-circle player resolutions and boundary impact hazards.
 *   `forces.rs`: Implements gravity equations, coyote ledge jump calculations, fast fall, and wall-sliding friction.
-*   `weapon.rs`: Defines projectile trajectory models, active/passive firing controllers, bullet bounces, and round sweeps.
-*   `particles.rs`: Handles particle explosion visual effects on border hit.
-*   `anim.rs`: Solves dynamic procedural walking stepping leg nodes and draws score UI overlays.
-*   `card_selection.rs`: Powers selection screen layout cards, text, and gamepad navigation systems.
+*   `weapon/`: Sub-module for projectile logic and rendering:
+    *   `mod.rs`: Entry point registering systems.
+    *   `physics.rs`: Projectile trajectory calculations, boundary exemptions, state sweeps, and custom card-land event hooks.
+    *   `draw.rs`: Bullet visual design (solid yellow teardrop drawing, glowing damage halos, special poison overlays).
+*   `particles.rs`: Handles particle explosion visual effects (e.g. spark trails, shockwaves, beams, and size scaling).
+*   `anim/`: Sub-module for procedural animations:
+    *   `mod.rs`: Registers anim systems.
+    *   `legs.rs`: Procedural leg anchor snapping and platform Y-level calculations.
+*   `card_list_ui.rs`: Spawns and draws the active card deck overlays.
+*   `menu_ui/settings_menu.rs`: Implements the pause menu/settings stats display using live settings.
+*   `card_selection/`: Sub-module for modifier choosing mechanics:
+    *   `mod.rs`: Registers card systems.
+    *   `defs.rs`: Defines `CardSelectionState`.
+    *   `systems.rs`: Handles host-authoritative unique drawing, input navigation, and card confirm logic.
+    *   `cards/`: The registry (`mod.rs`) and individual trait files for the 10 playable modifier cards.
+
+---
+
+## 🚀 Pick Up Where We Left Off
+
+### Current State
+*   The card system is fully modularized and successfully replicated across multiplayer connections.
+*   The game compiles cleanly with zero warnings (`cargo check` and `cargo test` pass successfully).
+*   The local signaling server connects P1 (Host) and P2 (Client) flawlessly.
+
+### Next Steps for the Incoming Developer/Agent
+1.  **Add More Unique Cards**:
+    *   To add a card, create a new file in `src/physics/card_selection/cards/` implementing the `Card` trait.
+    *   Import and register it in the array inside `src/physics/card_selection/cards/mod.rs` (increase the return count in `get_card` registry).
+    *   The host will automatically include it in the pool of cards drawn on round start.
+2.  **Sound FX Integration**:
+    *   Currently, the game lacks dynamic sounds on bullet fire, bullet impact, shield block, or boundary damage.
+    *   Add an asset loading step for `.wav`/`.ogg` audio files and schedule audio playbacks on both host and client during state updates.
+3.  **UI Enhancements**:
+    *   Enhance the matchmaking lobby screens and main menus to feel more premium, using vibrant neon colors and subtle sliding transitions.

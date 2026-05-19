@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::picking::Pickable;
 use crate::player::Player;
 use crate::settings::{PersistentPlayerStats, GameState};
-use crate::physics::card_selection::CARDS;
 
 #[derive(Component)]
 pub struct CardListUiContainer;
@@ -118,11 +117,11 @@ fn spawn_card_widget(
     player_color: Color,
     bg_color: Color,
 ) {
-    if card_index >= CARDS.len() {
+    if card_index >= crate::physics::card_selection::cards::TOTAL_CARDS_COUNT {
         return;
     }
-    let card_def = &CARDS[card_index];
-    let name_chars: String = card_def.name.chars().take(2).collect();
+    let card_def = crate::physics::card_selection::cards::get_card(card_index).unwrap();
+    let name_chars: String = card_def.name().chars().take(2).collect();
 
     builder.spawn((
         Node {
@@ -172,7 +171,7 @@ fn spawn_card_widget(
         )).with_children(|popup_parent| {
             // Popup Card Title (Bold, styled matching selection cards)
             popup_parent.spawn((
-                Text::new(card_def.name),
+                Text::new(card_def.name()),
                 TextFont {
                     font_size: 18.0,
                     ..default()
@@ -190,7 +189,7 @@ fn spawn_card_widget(
 
             // Popup Card Description
             popup_parent.spawn((
-                Text::new(card_def.desc.replace('\n', " ")),
+                Text::new(card_def.desc().replace('\n', " ")),
                 TextFont {
                     font_size: 12.0,
                     ..default()
@@ -207,7 +206,7 @@ fn spawn_card_widget(
             ));
 
             // Popup Card Stats Lines
-            for stat_line in card_def.stat_lines {
+            for stat_line in card_def.stat_lines() {
                 let stat_color = if stat_line.starts_with('+') || stat_line.contains("Adds") {
                     Color::srgb(0.3, 0.9, 0.3) // Green for buffs
                 } else {

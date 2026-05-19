@@ -42,6 +42,7 @@ impl Plugin for PhysicsPlugin {
             weapon::weapon_update_system,
             weapon::weapon_fire_system,
             weapon::projectile_physics_system,
+            card_selection::cards::gravity_vortex::gravity_well_system,
             crate::physics::card_selection::check_player_death,
         ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(run_physics_simulation)));
 
@@ -55,6 +56,7 @@ impl Plugin for PhysicsPlugin {
         app.add_systems(Update, (
             particles::update_particles,
             weapon::draw_projectiles,
+            card_selection::cards::gravity_vortex::draw_gravity_wells,
         ).run_if(in_state(GameState::Gameplay).and(is_not_paused)));
 
         // Noodle drawing and visual systems (continue running while paused to draw visual frames)
