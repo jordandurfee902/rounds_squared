@@ -48,8 +48,8 @@ impl Plugin for PhysicsPlugin {
 
         // Network synchronization systems (run in all online states)
         app.add_systems(Update, (
-            crate::net::host_network_system.run_if(resource_equals(crate::net::IsNetworked(true)).and(resource_equals(crate::net::LocalPlayerIndex(0)))),
-            crate::net::client_network_system.run_if(resource_equals(crate::net::IsNetworked(true)).and(resource_equals(crate::net::LocalPlayerIndex(1)))),
+            crate::net::host_network_system.run_if(run_host_network),
+            crate::net::client_network_system.run_if(run_client_network),
         ));
 
         // 3. Purely visual particles & projectile rendering (always in Update loop in both modes)
@@ -116,4 +116,18 @@ pub fn run_physics_simulation(
     local_idx: Res<crate::net::LocalPlayerIndex>,
 ) -> bool {
     !is_net.0 || local_idx.0 == 0
+}
+
+fn run_host_network(
+    is_net: Option<Res<crate::net::IsNetworked>>,
+    local_idx: Option<Res<crate::net::LocalPlayerIndex>>,
+) -> bool {
+    is_net.map(|n| n.0).unwrap_or(false) && local_idx.map(|idx| idx.0 == 0).unwrap_or(false)
+}
+
+fn run_client_network(
+    is_net: Option<Res<crate::net::IsNetworked>>,
+    local_idx: Option<Res<crate::net::LocalPlayerIndex>>,
+) -> bool {
+    is_net.map(|n| n.0).unwrap_or(false) && local_idx.map(|idx| idx.0 > 0).unwrap_or(false)
 }

@@ -43,10 +43,7 @@ pub fn boundary_collision(
                     pos.x = -half_width + radius + 15.0; // push inside safely
                     block.control_lockout_timer = settings.boundary_deflect_lockout; // Disable input control to carry launch momentum
                     
-                    let ring_color = match player {
-                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
-                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
-                    };
+                    let ring_color = player.color();
                     spawn_damage_explosion(&mut commands, Vec2::new(-half_width, pos.y), ring_color, 25.0, seed);
                 } else if !grace_period && vel.x < -10.0 {
                     // Take boundary damage!
@@ -68,10 +65,7 @@ pub fn boundary_collision(
                     pos.x = half_width - radius - 15.0; // push inside safely
                     block.control_lockout_timer = settings.boundary_deflect_lockout; // Disable input control to carry launch momentum
                     
-                    let ring_color = match player {
-                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
-                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
-                    };
+                    let ring_color = player.color();
                     spawn_damage_explosion(&mut commands, Vec2::new(half_width, pos.y), ring_color, 25.0, seed + 1);
                 } else if !grace_period && vel.x > 10.0 {
                     // Take boundary damage!
@@ -96,10 +90,7 @@ pub fn boundary_collision(
                     pos.y = -half_height + radius + 15.0; // push inside safely
                     block.control_lockout_timer = settings.boundary_deflect_lockout; // Disable input control to carry launch momentum
                     
-                    let ring_color = match player {
-                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
-                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
-                    };
+                    let ring_color = player.color();
                     spawn_damage_explosion(&mut commands, Vec2::new(pos.x, -half_height), ring_color, 25.0, seed + 2);
                 } else if !grace_period && vel.y < -10.0 {
                     // Take boundary damage!
@@ -122,10 +113,7 @@ pub fn boundary_collision(
                     pos.y = half_height - radius - 15.0; // push inside safely
                     block.control_lockout_timer = settings.boundary_deflect_lockout; // Disable input control to carry launch momentum
                     
-                    let ring_color = match player {
-                        Player::P1 => Color::srgb(0.0, 0.85, 1.0),
-                        Player::P2 => Color::srgb(1.0, 0.55, 0.1),
-                    };
+                    let ring_color = player.color();
                     spawn_damage_explosion(&mut commands, Vec2::new(pos.x, half_height), ring_color, 25.0, seed + 3);
                 } else if !grace_period && vel.y > 10.0 {
                     // Take boundary damage!

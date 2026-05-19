@@ -47,18 +47,16 @@ pub fn update_aim(
 
     for (player, transform, velocity, mut aim, stats) in query.iter_mut() {
         if is_net {
-            let local_player = match local_idx {
-                0 => Player::P1,
-                _ => Player::P2,
-            };
+            let local_player = Player::from_index(local_idx);
             if *player != local_player {
                 continue; // Skip updating remote player's aim locally!
             }
         }
 
-        let slot = match player {
-            Player::P1 => &lobby_slots.p1,
-            Player::P2 => &lobby_slots.p2,
+        let slot = if player.index() < lobby_slots.slots.len() {
+            &lobby_slots.slots[player.index()]
+        } else {
+            &None
         };
 
         if let Some(device) = slot {
@@ -157,6 +155,7 @@ pub fn update_aim(
                         }
                     }
                 }
+                _ => {}
             }
         }
     }

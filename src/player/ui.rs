@@ -52,10 +52,7 @@ pub fn draw_health_bars(
             let fg_width = bar_width * health_pct;
             let fg_center = bar_center - Vec2::new((bar_width - fg_width) / 2.0, 0.0);
             
-            let color = match player {
-                Player::P1 => Color::srgb(0.2, 0.8, 0.2), // Vibrant Green
-                Player::P2 => Color::srgb(0.2, 0.8, 0.2),
-            };
+            let color = player.color();
 
             // Draw solid foreground inside with 2.0 pixels padding
             draw_filled_rect(

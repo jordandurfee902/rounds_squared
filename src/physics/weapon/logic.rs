@@ -55,10 +55,7 @@ pub fn weapon_fire_system(
     for (player, transform, aim, input, mut weapon) in query.iter_mut() {
         seed_idx += 1;
         
-        let p_stats = match player {
-            Player::P1 => &persistent_stats.p1,
-            Player::P2 => &persistent_stats.p2,
-        };
+        let p_stats = &persistent_stats.players[player.index()];
 
         // 1. Process manual reload inputs
         let manual_reload_pressed = input.reload;
@@ -105,10 +102,7 @@ pub fn weapon_fire_system(
             ));
 
             // Trigger beautiful muzzle flash spark burst scaled by bullet damage!
-            let spark_color = match player {
-                Player::P1 => Color::srgb(0.4, 0.7, 1.0), // Bright Blue sparks
-                Player::P2 => Color::srgb(1.0, 0.7, 0.3), // Bright Orange sparks
-            };
+            let spark_color = player.color();
             let spark_count = (p_stats.bullet_damage * 0.5 + 4.0).round() as usize;
             spawn_spark_burst(&mut commands, barrel_end, spark_color, spark_count, seed_idx * 100);
         }

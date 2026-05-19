@@ -24,14 +24,23 @@ pub struct LocalInput<'w, 's> {
     pub ctrl_controls: Option<Res<'w, crate::settings::ControllerControls>>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct HostSystemResources<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub socket_res: Option<ResMut<'w, MatchboxSocketResource>>,
+    pub next_state: ResMut<'w, NextState<GameState>>,
+    pub lobby_slots: ResMut<'w, LobbySlots>,
+    pub score_tracker: Res<'w, ScoreTracker>,
+    pub active_map: Res<'w, ActiveMap>,
+    pub state: Res<'w, State<GameState>>,
+    pub persistent_stats: ResMut<'w, PersistentPlayerStats>,
+    pub card_state: Option<ResMut<'w, crate::physics::card_selection::CardSelectionState>>,
+    pub time: Res<'w, Time>,
+    pub rollback_rng: Option<ResMut<'w, crate::net::RollbackRng>>,
+}
+
 pub fn host_network_system(
-    mut commands: Commands,
-    socket_res: Option<ResMut<MatchboxSocketResource>>,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut lobby_slots: ResMut<LobbySlots>,
-    score_tracker: Res<ScoreTracker>,
-    active_map: Res<ActiveMap>,
-    state: Res<State<GameState>>,
+    mut resources: HostSystemResources,
     mut players: Query<(
         &Player,
         &mut Transform,
@@ -48,31 +57,45 @@ pub fn host_network_system(
     ), Without<Projectile>>,
     projectiles: Query<(&Transform, &Projectile), Without<Player>>,
     explosions: Query<(Entity, &ExplosionRecordComponent)>,
-    mut persistent_stats: ResMut<PersistentPlayerStats>,
-    mut card_state: Option<ResMut<crate::physics::card_selection::CardSelectionState>>,
     local_input: LocalInput,
-    time: Res<Time>,
     mut gamepad_cooldown: Local<f32>,
     gravity_wells_query: Query<(&Transform, &crate::physics::card_selection::cards::gravity_vortex::GravityWell), Without<Player>>,
 ) {
+    let HostSystemResources {
+        mut commands,
+        socket_res,
+        mut next_state,
+        mut lobby_slots,
+        score_tracker,
+        active_map,
+        state,
+        mut persistent_stats,
+        mut card_state,
+        time,
+        mut rollback_rng,
+    } = resources;
+
     let Some(mut socket) = socket_res else {
         return;
     };
     socket.update_peers();
 
-    let peer_ids: Vec<_> = socket.connected_peers().collect();
-    if peer_ids.is_empty() {
-        return;
+    let local_id = socket.id().expect("Socket should have an ID");
+    let mut all_ids = vec![local_id];
+    for peer in socket.connected_peers() {
+        all_ids.push(peer);
     }
-    let client_peer = peer_ids[0];
+    all_ids.sort_by_key(|id| id.to_string());
 
-    // 1. Receive client inputs
-    let mut client_packet: Option<ClientInputPacket> = None;
+    // 1. Receive client inputs from all client peers
+    let mut client_packets: [Option<ClientInputPacket>; 8] = [None, None, None, None, None, None, None, None];
     let packets = socket.channel_mut(0).receive();
     for (peer, data) in packets {
-        if peer == client_peer {
-            if let Ok(pkt) = serde_json::from_slice::<ClientInputPacket>(&data) {
-                client_packet = Some(pkt);
+        if let Some(p_idx) = all_ids.iter().position(|&id| id == peer) {
+            if p_idx > 0 && p_idx < 8 {
+                if let Ok(pkt) = serde_json::from_slice::<ClientInputPacket>(&data) {
+                    client_packets[p_idx] = Some(pkt);
+                }
             }
         }
     }
@@ -91,6 +114,8 @@ pub fn host_network_system(
     let mut p1_card_right = false;
     let mut p1_card_confirm = false;
 
+    let host_device = &lobby_slots.slots[0];
+
     if is_card_selection {
         if *gamepad_cooldown > 0.0 {
             *gamepad_cooldown = (*gamepad_cooldown - time.delta_secs()).max(0.0);
@@ -98,7 +123,7 @@ pub fn host_network_system(
 
         let mut poll_keyboard = false;
         let mut poll_gamepad = None;
-        match &lobby_slots.p1 {
+        match host_device {
             Some(InputDevice::KeyboardMouse) => {
                 poll_keyboard = true;
             }
@@ -129,7 +154,7 @@ pub fn host_network_system(
             } else if let Some(g) = local_input.gamepads.iter().next() {
                 gp = Some(g);
             }
-        } else if lobby_slots.p1.is_none() {
+        } else if host_device.is_none() {
             if let Some(g) = local_input.gamepads.iter().next() {
                 gp = Some(g);
             }
@@ -163,7 +188,7 @@ pub fn host_network_system(
         let ctrl_default = crate::settings::ControllerControls::default();
         let ctrl = local_input.ctrl_controls.as_deref().unwrap_or(&ctrl_default);
 
-        if let Some(device) = &lobby_slots.p1 {
+        if let Some(device) = host_device {
             match device {
                 InputDevice::KeyboardMouse => {
                     let left_key = crate::settings::parse_key_code(&kb.move_left).unwrap_or(KeyCode::KeyA);
@@ -219,53 +244,18 @@ pub fn host_network_system(
         }
     }
 
-    // Apply local inputs to P1
-    for (player, _, _, _, _, _, _, _, mut input, _, _, _) in players.iter_mut() {
-        if *player == Player::P1 {
+    // Apply inputs to players
+    for (player, mut transform, mut vel, mut health, mut _stats, mut block, mut weapon, mut aim, mut input, mut grounded, mut _wall, mut _jump_allow) in players.iter_mut() {
+        let p_idx = player.index();
+        if p_idx == 0 {
             input.move_dir = p1_move_dir;
             input.jump = p1_jump;
             input.fast_fall = p1_fast_fall;
             input.fire = p1_fire;
             input.reload = p1_reload;
             input.block = p1_block;
-        }
-    }
-
-    // Apply local P1 Card Selection navigation
-    if *state.get() == GameState::CardSelection {
-        if let Some(ref mut cs) = card_state {
-            if cs.selecting_player == Player::P1 {
-                if p1_card_left {
-                    cs.selected_idx = if cs.selected_idx == 0 { 4 } else { cs.selected_idx - 1 };
-                } else if p1_card_right {
-                    cs.selected_idx = (cs.selected_idx + 1) % 5;
-                }
-
-                if p1_card_confirm {
-                    let p_stats = &mut persistent_stats.p1;
-                    apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
-                    next_state.set(GameState::Gameplay);
-                }
-            }
-        }
-    } else {
-        commands.remove_resource::<crate::physics::card_selection::CardSelectionState>();
-    }
-
-    // 2. Process Client Inputs
-    if let Some(pkt) = client_packet {
-        // Sync P2 lobby ready
-        if pkt.lobby_joined {
-            if lobby_slots.p2.is_none() {
-                lobby_slots.p2 = Some(if pkt.is_gamepad { InputDevice::Gamepad(Entity::PLACEHOLDER) } else { InputDevice::KeyboardMouse });
-            }
-        } else {
-            lobby_slots.p2 = None;
-        }
-
-        // Apply inputs to P2
-        for (player, _, _, _, _, _, _, mut aim, mut input, _, _, _) in players.iter_mut() {
-            if *player == Player::P2 {
+        } else if p_idx < 8 {
+            if let Some(pkt) = &client_packets[p_idx] {
                 input.move_dir = pkt.move_dir;
                 input.jump = pkt.jump;
                 input.fast_fall = pkt.fast_fall;
@@ -277,79 +267,139 @@ pub fn host_network_system(
                 }
             }
         }
+    }
 
-        // Card Selection navigation
-        if *state.get() == GameState::CardSelection {
-            if let Some(ref mut cs) = card_state {
-                if cs.selecting_player == Player::P2 {
-                    if pkt.card_left {
-                        cs.selected_idx = if cs.selected_idx == 0 { 4 } else { cs.selected_idx - 1 };
-                    } else if pkt.card_right {
-                        cs.selected_idx = (cs.selected_idx + 1) % 5;
-                    }
+    // Apply local P1 Card Selection navigation
+    if *state.get() == GameState::CardSelection {
+        if let Some(ref mut cs) = card_state {
+            let sel_idx = cs.selecting_player.index();
+            if sel_idx == 0 {
+                if p1_card_left {
+                    cs.selected_idx = if cs.selected_idx == 0 { 4 } else { cs.selected_idx - 1 };
+                } else if p1_card_right {
+                    cs.selected_idx = (cs.selected_idx + 1) % 5;
+                }
 
-                    if pkt.card_confirm {
-                        let p_stats = &mut persistent_stats.p2;
-                        apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
-                        next_state.set(GameState::Gameplay);
+                if p1_card_confirm {
+                    let p_stats = &mut persistent_stats.players[0];
+                    apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
+                    
+                    if let Some(ref mut rng) = rollback_rng {
+                        if !cs.queue.is_empty() {
+                            let next_player = cs.queue.remove(0);
+                            cs.selecting_player = next_player;
+                            cs.selected_idx = 2;
+
+                            let mut drawn = [0; 5];
+                            let mut available: Vec<usize> = (0..crate::physics::card_selection::cards::TOTAL_CARDS_COUNT).collect();
+                            for i in 0..5 {
+                                if available.is_empty() {
+                                    break;
+                                }
+                                let idx = (rng.next_f32() * available.len() as f32) as usize;
+                                drawn[i] = available.remove(idx);
+                            }
+                            cs.drawn_cards = drawn;
+                        } else {
+                            next_state.set(GameState::Gameplay);
+                        }
                     }
                 }
             }
         }
     }
 
-    // Auto gameplay trigger in Lobby
-    if *state.get() == GameState::Lobby && lobby_slots.p1.is_some() && lobby_slots.p2.is_some() {
-        next_state.set(GameState::Gameplay);
-    }
+    // Process Client Inputs for Lobby Slots & Card Selection
+    for i in 1..8 {
+        if i < all_ids.len() {
+            if let Some(pkt) = &client_packets[i] {
+                // Sync lobby slots
+                if pkt.lobby_joined {
+                    if lobby_slots.slots[i].is_none() {
+                        lobby_slots.slots[i] = Some(if pkt.is_gamepad { InputDevice::Gamepad(Entity::PLACEHOLDER) } else { InputDevice::KeyboardMouse });
+                    }
+                } else {
+                    lobby_slots.slots[i] = None;
+                }
 
-    // 3. Serialize World State
-    let mut p1_state = None;
-    let mut p2_state = None;
+                // Card Selection navigation for clients
+                if *state.get() == GameState::CardSelection {
+                    if let Some(ref mut cs) = card_state {
+                        if cs.selecting_player.index() == i {
+                            if pkt.card_left {
+                                cs.selected_idx = if cs.selected_idx == 0 { 4 } else { cs.selected_idx - 1 };
+                            } else if pkt.card_right {
+                                cs.selected_idx = (cs.selected_idx + 1) % 5;
+                            }
 
-    for (player, transform, vel, health, _, block, weapon, aim, _, grounded, _, _) in players.iter() {
-        let p_state = PlayerNetState {
-            pos: transform.translation.xy(),
-            vel: vel.0,
-            health: health.current,
-            max_health: health.max,
-            block_active_timer: block.active_timer,
-            block_cooldown_timer: block.cooldown_timer,
-            block_lockout_timer: block.control_lockout_timer,
-            aim_dir: aim.direction,
-            ammo_max: weapon.max_ammo,
-            ammo_current: weapon.current_ammo,
-            reload_timer: weapon.reload_timer,
-            grounded: grounded.0,
-        };
-        match player {
-            Player::P1 => p1_state = Some(p_state),
-            Player::P2 => p2_state = Some(p_state),
+                            if pkt.card_confirm {
+                                let p_stats = &mut persistent_stats.players[i];
+                                apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
+
+                                if let Some(ref mut rng) = rollback_rng {
+                                    if !cs.queue.is_empty() {
+                                        let next_player = cs.queue.remove(0);
+                                        cs.selecting_player = next_player;
+                                        cs.selected_idx = 2;
+
+                                        let mut drawn = [0; 5];
+                                        let mut available: Vec<usize> = (0..crate::physics::card_selection::cards::TOTAL_CARDS_COUNT).collect();
+                                        for i in 0..5 {
+                                            if available.is_empty() {
+                                                break;
+                                            }
+                                            let idx = (rng.next_f32() * available.len() as f32) as usize;
+                                            drawn[i] = available.remove(idx);
+                                        }
+                                        cs.drawn_cards = drawn;
+                                    } else {
+                                        next_state.set(GameState::Gameplay);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            lobby_slots.slots[i] = None;
         }
     }
 
-    let p1 = p1_state.unwrap_or(PlayerNetState {
+    // 3. Serialize World State
+    let mut players_net = vec![PlayerNetState {
         pos: Vec2::ZERO, vel: Vec2::ZERO, health: 100.0, max_health: 100.0,
         block_active_timer: 0.0, block_cooldown_timer: 0.0, block_lockout_timer: 0.0,
         aim_dir: Vec2::X, ammo_max: 5, ammo_current: 5, reload_timer: 0.0,
         grounded: true,
-    });
-    let p2 = p2_state.unwrap_or(PlayerNetState {
-        pos: Vec2::ZERO, vel: Vec2::ZERO, health: 100.0, max_health: 100.0,
-        block_active_timer: 0.0, block_cooldown_timer: 0.0, block_lockout_timer: 0.0,
-        aim_dir: Vec2::X, ammo_max: 5, ammo_current: 5, reload_timer: 0.0,
-        grounded: true,
-    });
+    }; 8];
+
+    for (player, transform, vel, health, _, block, weapon, aim, _, grounded, _, _) in players.iter() {
+        let p_idx = player.index();
+        if p_idx < 8 {
+            players_net[p_idx] = PlayerNetState {
+                pos: transform.translation.xy(),
+                vel: vel.0,
+                health: health.current,
+                max_health: health.max,
+                block_active_timer: block.active_timer,
+                block_cooldown_timer: block.cooldown_timer,
+                block_lockout_timer: block.control_lockout_timer,
+                aim_dir: aim.direction,
+                ammo_max: weapon.max_ammo,
+                ammo_current: weapon.current_ammo,
+                reload_timer: weapon.reload_timer,
+                grounded: grounded.0,
+            };
+        }
+    }
 
     let mut bullets = Vec::new();
     for (trans, proj) in projectiles.iter() {
         bullets.push(BulletNetState {
             pos: trans.translation.xy(),
             vel: proj.velocity,
-            owner: match proj.owner {
-                Player::P1 => "P1".to_string(),
-                Player::P2 => "P2".to_string(),
-            },
+            owner: format!("{:?}", proj.owner),
             damage: proj.damage,
             gravity: proj.gravity,
             size_multiplier: proj.size_multiplier,
@@ -375,14 +425,7 @@ pub fn host_network_system(
         commands.entity(ent).despawn();
     }
 
-    let selecting_player = if let Some(cs) = card_state.as_ref() {
-        match cs.selecting_player {
-            Player::P1 => "P1".to_string(),
-            Player::P2 => "P2".to_string(),
-        }
-    } else {
-        "P1".to_string()
-    };
+    let selecting_player = card_state.as_ref().map(|cs| cs.selecting_player.index());
     let card_selected_idx = if let Some(cs) = card_state.as_ref() { cs.selected_idx } else { 0 };
     let drawn_cards = if let Some(cs) = card_state.as_ref() { cs.drawn_cards } else { [0; 5] };
 
@@ -395,29 +438,44 @@ pub fn host_network_system(
         });
     }
 
+    let mut active_players = [false; 8];
+    let mut is_gamepad = [false; 8];
+    for i in 0..8 {
+        if lobby_slots.slots[i].is_some() {
+            active_players[i] = true;
+            is_gamepad[i] = lobby_slots.slots[i].as_ref().map(|d| matches!(d, InputDevice::Gamepad(_))).unwrap_or(false);
+        }
+    }
+
+    let mut player_cards = [
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), Vec::new(), Vec::new(), Vec::new()
+    ];
+    for i in 0..8 {
+        player_cards[i] = persistent_stats.players[i].cards.clone();
+    }
+
     let packet = HostStatePacket {
-        p1,
-        p2,
+        players: players_net,
         bullets,
         poison_clouds: Vec::new(),
         explosion_events,
         gravity_wells,
-        p1_wins: score_tracker.p1_wins,
-        p2_wins: score_tracker.p2_wins,
-        p1_joined: lobby_slots.p1.is_some(),
-        p2_joined: lobby_slots.p2.is_some(),
-        p1_is_gamepad: lobby_slots.p1.as_ref().map(|d| matches!(d, InputDevice::Gamepad(_))).unwrap_or(false),
-        p2_is_gamepad: lobby_slots.p2.as_ref().map(|d| matches!(d, InputDevice::Gamepad(_))).unwrap_or(false),
+        wins: score_tracker.wins,
+        active_players,
+        is_gamepad,
         active_map: format!("{:?}", *active_map),
         game_state: format!("{:?}", *state.get()),
         selecting_player,
         card_selected_idx,
         drawn_cards,
-        p1_cards: persistent_stats.p1.cards.clone(),
-        p2_cards: persistent_stats.p2.cards.clone(),
+        player_cards,
     };
 
-    if let Ok(bytes) = serde_json::to_vec(&packet) {
-        socket.channel_mut(0).send(bytes.into(), client_peer);
+    let peers: Vec<_> = socket.connected_peers().collect();
+    for peer in peers {
+        if let Ok(bytes) = serde_json::to_vec(&packet) {
+            socket.channel_mut(0).send(bytes.into(), peer);
+        }
     }
 }

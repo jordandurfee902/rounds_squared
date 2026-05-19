@@ -14,23 +14,22 @@ pub fn check_player_death(
     mut next_state: ResMut<NextState<GameState>>,
     mut rollback_rng: ResMut<crate::net::RollbackRng>,
 ) {
-    let mut dead_player = None;
-    for (_, player, health) in players_query.iter() {
-        if health.current <= 0.0 {
-            dead_player = Some(*player);
-            break;
-        }
-    }
+    let total_players = players_query.iter().count();
+    let alive_players: Vec<Player> = players_query.iter()
+        .filter(|(_, _, health)| health.current > 0.0)
+        .map(|(_, &player, _)| player)
+        .collect();
 
-    if let Some(player_who_died) = dead_player {
-        // Increment win count for the other player
-        match player_who_died {
-            Player::P1 => {
-                score.p2_wins += 1;
-            }
-            Player::P2 => {
-                score.p1_wins += 1;
-            }
+    let round_over = if total_players >= 2 {
+        alive_players.len() <= 1
+    } else {
+        alive_players.is_empty()
+    };
+
+    if round_over {
+        let winner = if alive_players.len() == 1 { Some(alive_players[0]) } else { None };
+        if let Some(w) = winner {
+            score.wins[w.index()] += 1;
         }
 
         // Deterministically select a new map using the synchronized RollbackRng seed!
@@ -67,44 +66,50 @@ pub fn check_player_death(
             commands.entity(particle_entity).despawn();
         }
 
-        // Draw 5 unique random card indices
-        let mut drawn = [0; 5];
-        let mut available: Vec<usize> = (0..super::cards::TOTAL_CARDS_COUNT).collect();
-        for i in 0..5 {
-            if available.is_empty() {
-                break;
+        let all_players: Vec<Player> = players_query.iter().map(|(_, &p, _)| p).collect();
+        let defeated: Vec<Player> = all_players.iter()
+            .filter(|&&p| Some(p) != winner)
+            .cloned()
+            .collect();
+
+        if defeated.is_empty() {
+            next_state.set(GameState::Gameplay);
+        } else {
+            // Draw 5 unique random card indices
+            let mut drawn = [0; 5];
+            let mut available: Vec<usize> = (0..super::cards::TOTAL_CARDS_COUNT).collect();
+            for i in 0..5 {
+                if available.is_empty() {
+                    break;
+                }
+                let idx = (rollback_rng.next_f32() * available.len() as f32) as usize;
+                drawn[i] = available.remove(idx);
             }
-            let idx = (rollback_rng.next_f32() * available.len() as f32) as usize;
-            drawn[i] = available.remove(idx);
+
+            let mut queue = defeated.clone();
+            let first_defeated = queue.remove(0);
+
+            commands.insert_resource(CardSelectionState {
+                selected_idx: 2, // highlight middle card by default
+                selecting_player: first_defeated,
+                drawn_cards: drawn,
+                queue,
+            });
+
+            // Open the Card Selection UI
+            next_state.set(GameState::CardSelection);
         }
-
-        // Dead player gets to choose a card!
-        commands.insert_resource(CardSelectionState {
-            selected_idx: 2, // highlight middle card by default
-            selecting_player: player_who_died,
-            drawn_cards: drawn,
-        });
-
-        // Open the Card Selection UI
-        next_state.set(GameState::CardSelection);
     }
 }
 
-pub fn setup_card_selection(
-    mut commands: Commands,
-    state: Res<CardSelectionState>,
+pub fn spawn_card_selection_ui(
+    commands: &mut Commands,
+    state: &CardSelectionState,
 ) {
     let x_offsets = [-1140.0, -570.0, 0.0, 570.0, 1140.0];
 
-    // Spawn Title Bounding Prompt
-    let title_color = match state.selecting_player {
-        Player::P1 => Color::srgb(0.3, 0.8, 1.0), // Blue
-        Player::P2 => Color::srgb(1.0, 0.6, 0.2), // Orange
-    };
-    let title_text = match state.selecting_player {
-        Player::P1 => "P1 DEFEATED - CHOOSE A MODIFIER CARD",
-        Player::P2 => "P2 DEFEATED - CHOOSE A MODIFIER CARD",
-    };
+    let title_color = state.selecting_player.color();
+    let title_text = format!("{:?} DEFEATED - CHOOSE A MODIFIER CARD", state.selecting_player);
 
     commands.spawn((
         Text2d::new(title_text),
@@ -190,6 +195,13 @@ pub fn setup_card_selection(
     }
 }
 
+pub fn setup_card_selection(
+    mut commands: Commands,
+    state: Res<CardSelectionState>,
+) {
+    spawn_card_selection_ui(&mut commands, &state);
+}
+
 pub fn cleanup_card_selection(
     mut commands: Commands,
     ui_nodes: Query<Entity, Or<(With<CardSelectionUiComponent>, With<SelectionHeaderComponent>)>>,
@@ -214,10 +226,7 @@ pub fn draw_card_gizmos(
         let angle = -(comp.index as f32 - 2.0) * 0.05;
 
         if is_hovered {
-            let hover_color = match state.selecting_player {
-                Player::P1 => Color::srgb(0.3, 0.8, 1.0), // Blue neon glow for P1 choice
-                Player::P2 => Color::srgb(1.0, 0.6, 0.2), // Orange neon glow for P2 choice
-            };
+            let hover_color = state.selecting_player.color();
             // Double outline swept rotated frames
             draw_rotated_rect(&mut gizmos, center, card_size, angle, hover_color);
             draw_rotated_rect(&mut gizmos, center, card_size + Vec2::new(8.0, 8.0), angle, hover_color);
@@ -264,6 +273,7 @@ pub fn draw_rotated_rect(
 }
 
 pub fn card_selection_input(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
     lobby_slots: Res<crate::settings::LobbySlots>,
@@ -272,6 +282,8 @@ pub fn card_selection_input(
     mut state: ResMut<CardSelectionState>,
     mut persistent_stats: ResMut<PersistentPlayerStats>,
     mut next_state: ResMut<NextState<GameState>>,
+    ui_nodes: Query<Entity, Or<(With<CardSelectionUiComponent>, With<SelectionHeaderComponent>)>>,
+    mut rollback_rng: ResMut<crate::net::RollbackRng>,
 ) {
     if *gamepad_cooldown > 0.0 {
         *gamepad_cooldown = (*gamepad_cooldown - time.delta_secs()).max(0.0);
@@ -280,9 +292,10 @@ pub fn card_selection_input(
     let mut step = 0i32;
     let mut confirm = false;
 
-    let selecting_device = match state.selecting_player {
-        Player::P1 => &lobby_slots.p1,
-        Player::P2 => &lobby_slots.p2,
+    let selecting_device = if state.selecting_player.index() < lobby_slots.slots.len() {
+        &lobby_slots.slots[state.selecting_player.index()]
+    } else {
+        &None
     };
 
     match selecting_device {
@@ -343,11 +356,8 @@ pub fn card_selection_input(
     }
 
     if confirm {
-        // Apply selected stats modifiers to the dead player
-        let p_stats = match state.selecting_player {
-            Player::P1 => &mut persistent_stats.p1,
-            Player::P2 => &mut persistent_stats.p2,
-        };
+        // Apply selected stats modifiers to the selecting player
+        let p_stats = &mut persistent_stats.players[state.selecting_player.index()];
 
         let card_idx = state.drawn_cards[state.selected_idx];
         p_stats.cards.push(card_idx);
@@ -356,7 +366,35 @@ pub fn card_selection_input(
             card.apply(p_stats);
         }
 
-        // Return to round gameplay
-        next_state.set(GameState::Gameplay);
+        // Check if there are more players in the queue
+        if !state.queue.is_empty() {
+            // Despawn old card selection UI
+            for entity in ui_nodes.iter() {
+                commands.entity(entity).despawn();
+            }
+
+            // Pop next player from queue
+            let next_player = state.queue.remove(0);
+            state.selecting_player = next_player;
+            state.selected_idx = 2;
+
+            // Draw 5 new unique random card indices
+            let mut drawn = [0; 5];
+            let mut available: Vec<usize> = (0..super::cards::TOTAL_CARDS_COUNT).collect();
+            for i in 0..5 {
+                if available.is_empty() {
+                    break;
+                }
+                let idx = (rollback_rng.next_f32() * available.len() as f32) as usize;
+                drawn[i] = available.remove(idx);
+            }
+            state.drawn_cards = drawn;
+
+            // Spawn new card selection UI in-place
+            spawn_card_selection_ui(&mut commands, &state);
+        } else {
+            // No more players, return to gameplay
+            next_state.set(GameState::Gameplay);
+        }
     }
 }

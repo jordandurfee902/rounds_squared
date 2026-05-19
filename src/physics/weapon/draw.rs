@@ -60,10 +60,7 @@ pub fn draw_projectiles(
             draw_teardrop_outline(&mut gizmos, curr_pos, bullet_radius + 6.0, Color::srgb(0.9, 0.1, 1.0));
         } else if proj.damage >= 30.0 {
             // Medium damage stage: themed glow border for player identity
-            let glow_color = match proj.owner {
-                Player::P1 => Color::srgb(0.0, 0.85, 1.0),
-                Player::P2 => Color::srgb(1.0, 0.55, 0.1),
-            };
+            let glow_color = proj.owner.color();
             draw_teardrop_outline(&mut gizmos, curr_pos, bullet_radius + 3.5, glow_color);
         }
 

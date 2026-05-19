@@ -6,6 +6,7 @@ pub struct CardSelectionState {
     pub selected_idx: usize,
     pub selecting_player: Player,
     pub drawn_cards: [usize; 5],
+    pub queue: Vec<Player>,
 }
 
 #[derive(Component, Debug, Clone)]

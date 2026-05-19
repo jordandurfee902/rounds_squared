@@ -20,8 +20,7 @@ pub enum InputDevice {
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LobbySlots {
-    pub p1: Option<InputDevice>,
-    pub p2: Option<InputDevice>,
+    pub slots: [Option<InputDevice>; 8],
 }
 
 #[derive(Debug, Clone)]
@@ -51,8 +50,7 @@ pub struct PlayerStats {
 
 #[derive(Resource, Debug, Clone)]
 pub struct PersistentPlayerStats {
-    pub p1: PlayerStats,
-    pub p2: PlayerStats,
+    pub players: [PlayerStats; 8],
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -193,13 +191,9 @@ impl Default for PhysicsSettings {
 }
 
 #[derive(Resource, Debug, Clone)]
-pub struct P1WeaponSettings(pub CharacterSettings);
-
-#[derive(Resource, Debug, Clone)]
-pub struct P2WeaponSettings(pub CharacterSettings);
+pub struct PlayerWeaponSettings(pub [CharacterSettings; 8]);
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScoreTracker {
-    pub p1_wins: u32,
-    pub p2_wins: u32,
+    pub wins: [u32; 8],
 }

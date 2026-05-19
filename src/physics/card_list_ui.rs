@@ -29,23 +29,35 @@ pub fn spawn_card_list_ui(
     mut commands: Commands,
     persistent_stats: Res<PersistentPlayerStats>,
     existing_container: Query<Entity, With<CardListUiContainer>>,
+    lobby_slots: Res<crate::settings::LobbySlots>,
 ) {
     // 1. Despawn existing UI if any to rebuild cleanly (in Bevy 0.18, despawn() recursively cleans up all children automatically)
     for entity in existing_container.iter() {
         commands.entity(entity).despawn();
     }
 
-    let has_p1 = !persistent_stats.p1.cards.is_empty();
-    let has_p2 = !persistent_stats.p2.cards.is_empty();
+    // Determine active players
+    let mut active_indices = Vec::new();
+    for i in 0..8 {
+        if lobby_slots.slots[i].is_some() {
+            active_indices.push(i);
+        }
+    }
+    if active_indices.is_empty() {
+        active_indices.push(0);
+        active_indices.push(1);
+    }
 
-    // If neither player has any cards yet, don't draw anything (no placeholders)
-    if !has_p1 && !has_p2 {
+    // Check if any of the active players actually have cards
+    let mut total_cards = 0;
+    for &i in active_indices.iter() {
+        total_cards += persistent_stats.players[i].cards.len();
+    }
+
+    if total_cards == 0 {
         return;
     }
 
-    // Colors matching player visual themes
-    let p1_color = Color::srgb(0.0, 0.83, 1.0); // Neon P1 Cyan/Blue
-    let p2_color = Color::srgb(1.0, 0.55, 0.04); // Neon P2 Orange
     let bg_widget = Color::srgba(0.02, 0.02, 0.02, 0.85);
 
     // Spawn the root absolute top-right container
@@ -60,52 +72,34 @@ pub fn spawn_card_list_ui(
         },
         CardListUiContainer,
     )).with_children(|parent| {
-        // Player 1 Row
-        if has_p1 {
-            parent.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            }).with_children(|row_parent| {
-                row_parent.spawn((
-                    Text::new("P1:"),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(p1_color),
-                    Pickable::IGNORE,
-                ));
+        for &i in active_indices.iter() {
+            let cards = &persistent_stats.players[i].cards;
+            if !cards.is_empty() {
+                let player = Player::from_index(i);
+                let p_color = player.color();
+                let label = format!("P{}:", i + 1);
 
-                for &card_idx in &persistent_stats.p1.cards {
-                    spawn_card_widget(row_parent, Player::P1, card_idx, p1_color, bg_widget);
-                }
-            });
-        }
+                parent.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                }).with_children(|row_parent| {
+                    row_parent.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(p_color),
+                        Pickable::IGNORE,
+                    ));
 
-        // Player 2 Row
-        if has_p2 {
-            parent.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            }).with_children(|row_parent| {
-                row_parent.spawn((
-                    Text::new("P2:"),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(p2_color),
-                    Pickable::IGNORE,
-                ));
-
-                for &card_idx in &persistent_stats.p2.cards {
-                    spawn_card_widget(row_parent, Player::P2, card_idx, p2_color, bg_widget);
-                }
-            });
+                    for &card_idx in cards {
+                        spawn_card_widget(row_parent, player, card_idx, p_color, bg_widget);
+                    }
+                });
+            }
         }
     });
 }

@@ -76,23 +76,18 @@ pub struct GravityWellNetState {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HostStatePacket {
-    pub p1: PlayerNetState,
-    pub p2: PlayerNetState,
+    pub players: Vec<PlayerNetState>, // length matches number of spawned players, or fixed length 8
     pub bullets: Vec<BulletNetState>,
     pub poison_clouds: Vec<PoisonCloudNetState>,
     pub explosion_events: Vec<ExplosionEvent>,
     pub gravity_wells: Vec<GravityWellNetState>,
-    pub p1_wins: u32,
-    pub p2_wins: u32,
-    pub p1_joined: bool,
-    pub p2_joined: bool,
-    pub p1_is_gamepad: bool,
-    pub p2_is_gamepad: bool,
+    pub wins: [u32; 8],
+    pub active_players: [bool; 8],
+    pub is_gamepad: [bool; 8],
     pub active_map: String,
     pub game_state: String,
-    pub selecting_player: String, // "P1" or "P2"
+    pub selecting_player: Option<usize>, // Player index currently selecting a card
     pub card_selected_idx: usize,
     pub drawn_cards: [usize; 5],
-    pub p1_cards: Vec<usize>,
-    pub p2_cards: Vec<usize>,
+    pub player_cards: [Vec<usize>; 8],
 }

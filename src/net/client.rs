@@ -36,6 +36,7 @@ pub fn client_network_system(
     local_input: LocalInput,
     time: Res<Time>,
     mut gamepad_cooldown: Local<f32>,
+    local_player_idx: Option<Res<crate::net::LocalPlayerIndex>>,
 ) {
     let Some(mut socket) = socket_res else {
         return;
@@ -48,7 +49,9 @@ pub fn client_network_system(
     }
     let host_peer = peer_ids[0];
 
-    // 1. Gather client inputs (Player 2 controls)
+    let local_idx = local_player_idx.map(|idx| idx.0).unwrap_or(0);
+
+    // 1. Gather client inputs
     let mut move_dir = 0.0;
     let mut jump = false;
     let mut fast_fall = false;
@@ -62,6 +65,12 @@ pub fn client_network_system(
     let mut card_right = false;
     let mut card_confirm = false;
 
+    let selecting_device = if local_idx < lobby_slots.slots.len() {
+        &lobby_slots.slots[local_idx]
+    } else {
+        &None
+    };
+
     if is_card_selection {
         if *gamepad_cooldown > 0.0 {
             *gamepad_cooldown = (*gamepad_cooldown - time.delta_secs()).max(0.0);
@@ -69,7 +78,7 @@ pub fn client_network_system(
 
         let mut poll_keyboard = false;
         let mut poll_gamepad = None;
-        match &lobby_slots.p2 {
+        match selecting_device {
             Some(InputDevice::KeyboardMouse) => {
                 poll_keyboard = true;
             }
@@ -100,7 +109,7 @@ pub fn client_network_system(
             } else if let Some(g) = local_input.gamepads.iter().next() {
                 gp = Some(g);
             }
-        } else if lobby_slots.p2.is_none() {
+        } else if selecting_device.is_none() {
             if let Some(g) = local_input.gamepads.iter().next() {
                 gp = Some(g);
             }
@@ -134,7 +143,7 @@ pub fn client_network_system(
         let ctrl_default = crate::settings::ControllerControls::default();
         let ctrl = local_input.ctrl_controls.as_deref().unwrap_or(&ctrl_default);
 
-        if let Some(device) = &lobby_slots.p2 {
+        if let Some(device) = selecting_device {
             match device {
                 InputDevice::KeyboardMouse => {
                     let left_key = crate::settings::parse_key_code(&kb.move_left).unwrap_or(KeyCode::KeyA);
@@ -191,8 +200,9 @@ pub fn client_network_system(
     }
 
     let mut aim_direction = Vec2::X;
+    let local_player = Player::from_index(local_idx);
     for (player, _, _, _, _, _, _, aim, _, _, _, _) in players.iter() {
-        if *player == Player::P2 {
+        if *player == local_player {
             aim_direction = aim.direction;
         }
     }
@@ -206,8 +216,8 @@ pub fn client_network_system(
         block,
         aim_dir_x: aim_direction.x,
         aim_dir_y: aim_direction.y,
-        lobby_joined: lobby_slots.p2.is_some(),
-        is_gamepad: lobby_slots.p2.as_ref().map(|d| matches!(d, InputDevice::Gamepad(_))).unwrap_or(false),
+        lobby_joined: selecting_device.is_some(),
+        is_gamepad: selecting_device.as_ref().map(|d| matches!(d, InputDevice::Gamepad(_))).unwrap_or(false),
         card_left,
         card_right,
         card_confirm,
@@ -234,13 +244,11 @@ pub fn client_network_system(
 
     // Sync persistent stats and apply cards if changed
     let mut stats_changed = false;
-    if persistent_stats.p1.cards != pkt.p1_cards {
-        persistent_stats.p1.cards = pkt.p1_cards.clone();
-        stats_changed = true;
-    }
-    if persistent_stats.p2.cards != pkt.p2_cards {
-        persistent_stats.p2.cards = pkt.p2_cards.clone();
-        stats_changed = true;
+    for i in 0..8 {
+        if persistent_stats.players[i].cards != pkt.player_cards[i] {
+            persistent_stats.players[i].cards = pkt.player_cards[i].clone();
+            stats_changed = true;
+        }
     }
     if stats_changed {
         let settings = crate::settings::load_settings();
@@ -249,37 +257,37 @@ pub fn client_network_system(
 
     // 3. Overwrite local players status
     for (player, mut transform, mut vel, mut health, mut _stats, mut block, mut weapon, mut aim, mut _input, mut grounded, mut _wall, mut _jump_allow) in players.iter_mut() {
-        let p_state = match player {
-            Player::P1 => &pkt.p1,
-            Player::P2 => &pkt.p2,
-        };
-
-        transform.translation = p_state.pos.extend(transform.translation.z);
-        vel.0 = p_state.vel;
-        health.current = p_state.health;
-        health.max = p_state.max_health;
-        block.active_timer = p_state.block_active_timer;
-        block.cooldown_timer = p_state.block_cooldown_timer;
-        block.control_lockout_timer = p_state.block_lockout_timer;
-        aim.direction = p_state.aim_dir;
-        weapon.max_ammo = p_state.ammo_max;
-        weapon.current_ammo = p_state.ammo_current;
-        weapon.reload_timer = p_state.reload_timer;
-        grounded.0 = p_state.grounded;
+        let p_idx = player.index();
+        if p_idx < pkt.players.len() {
+            let p_state = &pkt.players[p_idx];
+            transform.translation = p_state.pos.extend(transform.translation.z);
+            vel.0 = p_state.vel;
+            health.current = p_state.health;
+            health.max = p_state.max_health;
+            block.active_timer = p_state.block_active_timer;
+            block.cooldown_timer = p_state.block_cooldown_timer;
+            block.control_lockout_timer = p_state.block_lockout_timer;
+            aim.direction = p_state.aim_dir;
+            weapon.max_ammo = p_state.ammo_max;
+            weapon.current_ammo = p_state.ammo_current;
+            weapon.reload_timer = p_state.reload_timer;
+            grounded.0 = p_state.grounded;
+        }
     }
 
     // Overwrite Lobby slots
-    if pkt.p1_joined {
-        if lobby_slots.p1.is_none() {
-            lobby_slots.p1 = Some(if pkt.p1_is_gamepad { InputDevice::Gamepad(Entity::PLACEHOLDER) } else { InputDevice::KeyboardMouse });
+    for i in 0..8 {
+        if pkt.active_players[i] {
+            if lobby_slots.slots[i].is_none() {
+                lobby_slots.slots[i] = Some(if pkt.is_gamepad[i] { InputDevice::Gamepad(Entity::PLACEHOLDER) } else { InputDevice::KeyboardMouse });
+            }
+        } else {
+            lobby_slots.slots[i] = None;
         }
-    } else {
-        lobby_slots.p1 = None;
     }
 
     // Overwrite Score
-    score_tracker.p1_wins = pkt.p1_wins;
-    score_tracker.p2_wins = pkt.p2_wins;
+    score_tracker.wins = pkt.wins;
 
     // Overwrite GameState
     let target_state = parse_game_state(&pkt.game_state);
@@ -295,9 +303,10 @@ pub fn client_network_system(
 
     // Overwrite Card selection state
     if target_state == GameState::CardSelection {
-        let sel_player = match pkt.selecting_player.as_str() {
-            "P1" => Player::P1,
-            _ => Player::P2,
+        let sel_player = if let Some(idx) = pkt.selecting_player {
+            Player::from_index(idx)
+        } else {
+            Player::P1
         };
         if let Some(mut cs) = card_state {
             cs.selecting_player = sel_player;
@@ -308,6 +317,7 @@ pub fn client_network_system(
                 selected_idx: pkt.card_selected_idx,
                 selecting_player: sel_player,
                 drawn_cards: pkt.drawn_cards,
+                queue: Vec::new(),
             });
         }
     } else {
@@ -324,7 +334,14 @@ pub fn client_network_system(
             Projectile {
                 owner: match b.owner.as_str() {
                     "P1" => Player::P1,
-                    _ => Player::P2,
+                    "P2" => Player::P2,
+                    "P3" => Player::P3,
+                    "P4" => Player::P4,
+                    "P5" => Player::P5,
+                    "P6" => Player::P6,
+                    "P7" => Player::P7,
+                    "P8" => Player::P8,
+                    _ => Player::P1,
                 },
                 velocity: b.vel,
                 base_damage: b.damage,
@@ -374,59 +391,35 @@ fn rebuild_player_stats(
     persistent_stats: &mut PersistentPlayerStats,
     settings: &crate::settings::AppSettings,
 ) {
-    // P1
-    persistent_stats.p1.movement_speed = settings.p1_character.speed;
-    persistent_stats.p1.jump_force = settings.physics.player_jump_force;
-    persistent_stats.p1.player_scale = settings.p1_character.size;
-    persistent_stats.p1.health_max = settings.p1_character.health;
-    persistent_stats.p1.bullet_range = settings.p1_character.bullet_range;
-    persistent_stats.p1.bullet_speed = settings.p1_character.bullet_speed;
-    persistent_stats.p1.bullet_gravity = settings.p1_character.bullet_gravity;
-    persistent_stats.p1.bullet_damage = settings.p1_character.damage;
-    persistent_stats.p1.bullet_size_mult = settings.p1_character.bullet_size_mult;
-    persistent_stats.p1.bullet_growth = settings.p1_character.bullet_growth;
-    persistent_stats.p1.max_ammo = settings.p1_character.max_ammo;
-    persistent_stats.p1.reload_time = settings.p1_character.reload_time;
-    persistent_stats.p1.fire_rate = settings.p1_character.fire_rate;
-    persistent_stats.p1.bounces = settings.p1_character.bounces;
-    persistent_stats.p1.bounce_speed_multiplier = settings.p1_character.bounce_speed_multiplier;
-    persistent_stats.p1.block_duration = settings.p1_character.block_duration;
-    persistent_stats.p1.block_cooldown = settings.p1_character.block_cooldown;
-    persistent_stats.p1.block_border_boost = settings.p1_character.block_border_boost;
-    persistent_stats.p1.special_effects = settings.p1_character.special_effects.clone();
+    for i in 0..8 {
+        let char_settings = settings.get_character(i);
+        let p = &mut persistent_stats.players[i];
+        
+        p.movement_speed = char_settings.speed;
+        p.jump_force = settings.physics.player_jump_force;
+        p.player_scale = char_settings.size;
+        p.health_max = char_settings.health;
+        p.bullet_range = char_settings.bullet_range;
+        p.bullet_speed = char_settings.bullet_speed;
+        p.bullet_gravity = char_settings.bullet_gravity;
+        p.bullet_damage = char_settings.damage;
+        p.bullet_size_mult = char_settings.bullet_size_mult;
+        p.bullet_growth = char_settings.bullet_growth;
+        p.max_ammo = char_settings.max_ammo;
+        p.reload_time = char_settings.reload_time;
+        p.fire_rate = char_settings.fire_rate;
+        p.bounces = char_settings.bounces;
+        p.bounce_speed_multiplier = char_settings.bounce_speed_multiplier;
+        p.block_duration = char_settings.block_duration;
+        p.block_cooldown = char_settings.block_cooldown;
+        p.block_border_boost = char_settings.block_border_boost;
+        p.special_effects = char_settings.special_effects.clone();
 
-    let p1_cards = persistent_stats.p1.cards.clone();
-    for &card_idx in &p1_cards {
-        if let Some(card) = crate::physics::card_selection::cards::get_card(card_idx) {
-            card.apply(&mut persistent_stats.p1);
-        }
-    }
-
-    // P2
-    persistent_stats.p2.movement_speed = settings.p2_character.speed;
-    persistent_stats.p2.jump_force = settings.physics.player_jump_force;
-    persistent_stats.p2.player_scale = settings.p2_character.size;
-    persistent_stats.p2.health_max = settings.p2_character.health;
-    persistent_stats.p2.bullet_range = settings.p2_character.bullet_range;
-    persistent_stats.p2.bullet_speed = settings.p2_character.bullet_speed;
-    persistent_stats.p2.bullet_gravity = settings.p2_character.bullet_gravity;
-    persistent_stats.p2.bullet_damage = settings.p2_character.damage;
-    persistent_stats.p2.bullet_size_mult = settings.p2_character.bullet_size_mult;
-    persistent_stats.p2.bullet_growth = settings.p2_character.bullet_growth;
-    persistent_stats.p2.max_ammo = settings.p2_character.max_ammo;
-    persistent_stats.p2.reload_time = settings.p2_character.reload_time;
-    persistent_stats.p2.fire_rate = settings.p2_character.fire_rate;
-    persistent_stats.p2.bounces = settings.p2_character.bounces;
-    persistent_stats.p2.bounce_speed_multiplier = settings.p2_character.bounce_speed_multiplier;
-    persistent_stats.p2.block_duration = settings.p2_character.block_duration;
-    persistent_stats.p2.block_cooldown = settings.p2_character.block_cooldown;
-    persistent_stats.p2.block_border_boost = settings.p2_character.block_border_boost;
-    persistent_stats.p2.special_effects = settings.p2_character.special_effects.clone();
-
-    let p2_cards = persistent_stats.p2.cards.clone();
-    for &card_idx in &p2_cards {
-        if let Some(card) = crate::physics::card_selection::cards::get_card(card_idx) {
-            card.apply(&mut persistent_stats.p2);
+        let p_cards = p.cards.clone();
+        for &card_idx in &p_cards {
+            if let Some(card) = crate::physics::card_selection::cards::get_card(card_idx) {
+                card.apply(p);
+            }
         }
     }
 }

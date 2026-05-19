@@ -11,15 +11,15 @@ pub fn start_matchmaking(
     let room_url = if let Some(res) = code_res {
         if res.code.is_empty() {
             info!("MATCHMAKING: Connecting to public matchmaking lobby...");
-            "wss://durfdog-sets.hf.space/rounds_lobby?next=2".to_string()
+            "wss://durfdog-sets.hf.space/rounds_lobby?next=8".to_string()
         } else {
             let formatted_code = res.code.replace(" ", "");
             info!("MATCHMAKING: Connecting to private room code: {} (is_host: {})", formatted_code, res.is_host);
-            format!("wss://durfdog-sets.hf.space/room_{}?next=2", formatted_code)
+            format!("wss://durfdog-sets.hf.space/room_{}?next=8", formatted_code)
         }
     } else {
         info!("MATCHMAKING: Connecting to public matchmaking lobby (fallback)...");
-        "wss://durfdog-sets.hf.space/rounds_lobby?next=2".to_string()
+        "wss://durfdog-sets.hf.space/rounds_lobby?next=8".to_string()
     };
     
     let (socket, message_loop) = WebRtcSocket::builder(&room_url)

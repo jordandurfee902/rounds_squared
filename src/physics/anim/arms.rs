@@ -91,10 +91,7 @@ pub fn draw_procedural_arms(
         let aim_dir = aim.direction;
         
         // Arm colors
-        let color = match player {
-            Player::P1 => Color::srgb(0.2, 0.5, 1.0),
-            Player::P2 => Color::srgb(1.0, 0.5, 0.2),
-        };
+        let color = player.color();
         
         // --- 1. WEAPON & DOMINANT ARM (AIMING SIDE) ---
         let gun_center = visual_center + aim_dir * (78.0 * scale);
@@ -199,10 +196,7 @@ pub fn draw_procedural_arms(
                 let alpha = (1.0 - dist_pct) * 0.12; // soft drop-off gradient
                 
                 let ring_radius = base_radius + offset;
-                let color = match player {
-                    Player::P1 => Color::srgba(0.0, 0.85, 1.0, alpha), // Soft glowing cyan/turquoise (similar but not exact to P1 blue)
-                    Player::P2 => Color::srgba(1.0, 0.55, 0.1, alpha), // Soft glowing amber/deep-orange (similar but not exact to P2 orange)
-                };
+                let color = player.color().with_alpha(alpha);
                 gizmos.circle_2d(visual_center, ring_radius, color);
             }
         }

@@ -33,10 +33,7 @@ pub fn projectile_physics_system(
 
     for (proj_entity, mut proj_transform, mut proj) in projectiles.iter_mut() {
         let owner_cards = if let Some(p_stats) = persistent_stats.as_ref() {
-            match proj.owner {
-                Player::P1 => p_stats.p1.cards.clone(),
-                Player::P2 => p_stats.p2.cards.clone(),
-            }
+            p_stats.players[proj.owner.index()].cards.clone()
         } else {
             Vec::new()
         };

@@ -58,10 +58,7 @@ pub fn update_and_draw_legs(
         let left_hip = visual_center + Vec2::new(-16.0, -15.0) * scale;
         let right_hip = visual_center + Vec2::new(16.0, -15.0) * scale;
         
-        let color = match player {
-            Player::P1 => Color::srgb(0.1, 0.35, 0.8), // Deep P1 Blue
-            Player::P2 => Color::srgb(0.8, 0.35, 0.1), // Deep P2 Orange
-        };
+        let color = player.color();
         
         if limbs.step_cooldown > 0.0 {
             limbs.step_cooldown -= dt;

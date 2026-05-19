@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::app::AppExit;
 use bevy::prelude::{MessageWriter, MessageReader};
 use bevy::input::keyboard::{KeyboardInput, Key};
-use crate::settings::{PersistentPlayerStats, GameState, PhysicsSettings, ScoreTracker, AppSettings, KeyboardControls, ControllerControls, P1WeaponSettings, P2WeaponSettings};
+use crate::settings::{PersistentPlayerStats, GameState, PhysicsSettings, ScoreTracker, AppSettings, KeyboardControls, ControllerControls, PlayerWeaponSettings};
 use crate::player::PlayerStatsComponent;
 use crate::player::{Player, Health};
 use crate::physics::weapon::Weapon;
@@ -119,45 +119,26 @@ pub fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
                     spawn_setting_row(list, "Wall Contact Slope Threshold", SettingType::WallContactSlopeThreshold);
                     spawn_setting_row(list, "Bullet Knockback Constant", SettingType::BulletKnockbackConstant);
 
-                    // Player 1 Stats
-                    spawn_section_header(list, "PLAYER 1 CHARACTER STATISTICS");
-                    spawn_setting_row(list, "Max Health", SettingType::P1Health);
-                    spawn_setting_row(list, "Movement Speed", SettingType::P1Speed);
-                    spawn_setting_row(list, "Player Scale Multiplier", SettingType::P1Size);
-                    spawn_setting_row(list, "Bullet Damage", SettingType::P1Damage);
-                    spawn_setting_row(list, "Bullet Range (seconds)", SettingType::P1BulletRange);
-                    spawn_setting_row(list, "Bullet Velocity", SettingType::P1BulletSpeed);
-                    spawn_setting_row(list, "Bullet Gravity Scale", SettingType::P1BulletGravity);
-                    spawn_setting_row(list, "Bullet Size Multiplier", SettingType::P1BulletSizeMult);
-                    spawn_setting_row(list, "Bullet Damage Growth (%)", SettingType::P1BulletGrowth);
-                    spawn_setting_row(list, "Max Ammo Capacity", SettingType::P1MaxAmmo);
-                    spawn_setting_row(list, "Weapon Reload Time", SettingType::P1ReloadTime);
-                    spawn_setting_row(list, "Rate of Fire Delay", SettingType::P1FireRate);
-                    spawn_setting_row(list, "Max Bullet Bounces", SettingType::P1Bounces);
-                    spawn_setting_row(list, "Bounce Speed Multiplier", SettingType::P1BounceSpeedMultiplier);
-                    spawn_setting_row(list, "Shield Block Duration", SettingType::P1BlockDuration);
-                    spawn_setting_row(list, "Shield Block Cooldown", SettingType::P1BlockCooldown);
-                    spawn_setting_row(list, "Border Block Force", SettingType::P1BlockBorderBoost);
-
-                    // Player 2 Stats
-                    spawn_section_header(list, "PLAYER 2 CHARACTER STATISTICS");
-                    spawn_setting_row(list, "Max Health", SettingType::P2Health);
-                    spawn_setting_row(list, "Movement Speed", SettingType::P2Speed);
-                    spawn_setting_row(list, "Player Scale Multiplier", SettingType::P2Size);
-                    spawn_setting_row(list, "Bullet Damage", SettingType::P2Damage);
-                    spawn_setting_row(list, "Bullet Range (seconds)", SettingType::P2BulletRange);
-                    spawn_setting_row(list, "Bullet Velocity", SettingType::P2BulletSpeed);
-                    spawn_setting_row(list, "Bullet Gravity Scale", SettingType::P2BulletGravity);
-                    spawn_setting_row(list, "Bullet Size Multiplier", SettingType::P2BulletSizeMult);
-                    spawn_setting_row(list, "Bullet Damage Growth (%)", SettingType::P2BulletGrowth);
-                    spawn_setting_row(list, "Max Ammo Capacity", SettingType::P2MaxAmmo);
-                    spawn_setting_row(list, "Weapon Reload Time", SettingType::P2ReloadTime);
-                    spawn_setting_row(list, "Rate of Fire Delay", SettingType::P2FireRate);
-                    spawn_setting_row(list, "Max Bullet Bounces", SettingType::P2Bounces);
-                    spawn_setting_row(list, "Bounce Speed Multiplier", SettingType::P2BounceSpeedMultiplier);
-                    spawn_setting_row(list, "Shield Block Duration", SettingType::P2BlockDuration);
-                    spawn_setting_row(list, "Shield Block Cooldown", SettingType::P2BlockCooldown);
-                    spawn_setting_row(list, "Border Block Force", SettingType::P2BlockBorderBoost);
+                    for i in 1..=8 {
+                        spawn_section_header(list, &format!("PLAYER {} CHARACTER STATISTICS", i));
+                        spawn_setting_row(list, "Max Health", SettingType::PlayerHealth(i - 1));
+                        spawn_setting_row(list, "Movement Speed", SettingType::PlayerSpeed(i - 1));
+                        spawn_setting_row(list, "Player Scale Multiplier", SettingType::PlayerSize(i - 1));
+                        spawn_setting_row(list, "Bullet Damage", SettingType::PlayerDamage(i - 1));
+                        spawn_setting_row(list, "Bullet Range (seconds)", SettingType::PlayerBulletRange(i - 1));
+                        spawn_setting_row(list, "Bullet Velocity", SettingType::PlayerBulletSpeed(i - 1));
+                        spawn_setting_row(list, "Bullet Gravity Scale", SettingType::PlayerBulletGravity(i - 1));
+                        spawn_setting_row(list, "Bullet Size Multiplier", SettingType::PlayerBulletSizeMult(i - 1));
+                        spawn_setting_row(list, "Bullet Damage Growth (%)", SettingType::PlayerBulletGrowth(i - 1));
+                        spawn_setting_row(list, "Max Ammo Capacity", SettingType::PlayerMaxAmmo(i - 1));
+                        spawn_setting_row(list, "Weapon Reload Time", SettingType::PlayerReloadTime(i - 1));
+                        spawn_setting_row(list, "Rate of Fire Delay", SettingType::PlayerFireRate(i - 1));
+                        spawn_setting_row(list, "Max Bullet Bounces", SettingType::PlayerBounces(i - 1));
+                        spawn_setting_row(list, "Bounce Speed Multiplier", SettingType::PlayerBounceSpeedMultiplier(i - 1));
+                        spawn_setting_row(list, "Shield Block Duration", SettingType::PlayerBlockDuration(i - 1));
+                        spawn_setting_row(list, "Shield Block Cooldown", SettingType::PlayerBlockCooldown(i - 1));
+                        spawn_setting_row(list, "Border Block Force", SettingType::PlayerBlockBorderBoost(i - 1));
+                    }
 
                     // Keyboard Controls
                     spawn_section_header(list, "KEYBOARD CONTROLS");
@@ -296,8 +277,7 @@ pub fn spawn_setting_row(
 
 pub fn save_and_sync_settings(
     physics_settings: &PhysicsSettings,
-    p1_base: &P1WeaponSettings,
-    p2_base: &P2WeaponSettings,
+    p_weapon: &PlayerWeaponSettings,
     kb_controls: &KeyboardControls,
     ctrl_controls: &ControllerControls,
     persistent_stats: &mut PersistentPlayerStats,
@@ -305,56 +285,45 @@ pub fn save_and_sync_settings(
 ) {
     let updated_settings = AppSettings {
         physics: physics_settings.clone(),
-        p1_character: p1_base.0.clone(),
-        p2_character: p2_base.0.clone(),
+        p1_character: p_weapon.0[0].clone(),
+        p2_character: p_weapon.0[1].clone(),
+        p3_character: p_weapon.0[2].clone(),
+        p4_character: p_weapon.0[3].clone(),
+        p5_character: p_weapon.0[4].clone(),
+        p6_character: p_weapon.0[5].clone(),
+        p7_character: p_weapon.0[6].clone(),
+        p8_character: p_weapon.0[7].clone(),
         keyboard_controls: kb_controls.clone(),
         controller_controls: ctrl_controls.clone(),
     };
     crate::settings::save_settings(&updated_settings);
 
     // Sync base fields to active round stats (preserving cards/special effects)
-    persistent_stats.p1.movement_speed = p1_base.0.speed;
-    persistent_stats.p1.health_max = p1_base.0.health;
-    persistent_stats.p1.player_scale = p1_base.0.size;
-    persistent_stats.p1.bullet_range = p1_base.0.bullet_range;
-    persistent_stats.p1.bullet_speed = p1_base.0.bullet_speed;
-    persistent_stats.p1.bullet_gravity = p1_base.0.bullet_gravity;
-    persistent_stats.p1.bullet_damage = p1_base.0.damage;
-    persistent_stats.p1.bullet_size_mult = p1_base.0.bullet_size_mult;
-    persistent_stats.p1.bullet_growth = p1_base.0.bullet_growth;
-    persistent_stats.p1.max_ammo = p1_base.0.max_ammo;
-    persistent_stats.p1.reload_time = p1_base.0.reload_time;
-    persistent_stats.p1.fire_rate = p1_base.0.fire_rate;
-    persistent_stats.p1.bounces = p1_base.0.bounces;
-    persistent_stats.p1.bounce_speed_multiplier = p1_base.0.bounce_speed_multiplier;
-    persistent_stats.p1.block_duration = p1_base.0.block_duration;
-    persistent_stats.p1.block_cooldown = p1_base.0.block_cooldown;
-    persistent_stats.p1.block_border_boost = p1_base.0.block_border_boost;
-
-    persistent_stats.p2.movement_speed = p2_base.0.speed;
-    persistent_stats.p2.health_max = p2_base.0.health;
-    persistent_stats.p2.player_scale = p2_base.0.size;
-    persistent_stats.p2.bullet_range = p2_base.0.bullet_range;
-    persistent_stats.p2.bullet_speed = p2_base.0.bullet_speed;
-    persistent_stats.p2.bullet_gravity = p2_base.0.bullet_gravity;
-    persistent_stats.p2.bullet_damage = p2_base.0.damage;
-    persistent_stats.p2.bullet_size_mult = p2_base.0.bullet_size_mult;
-    persistent_stats.p2.bullet_growth = p2_base.0.bullet_growth;
-    persistent_stats.p2.max_ammo = p2_base.0.max_ammo;
-    persistent_stats.p2.reload_time = p2_base.0.reload_time;
-    persistent_stats.p2.fire_rate = p2_base.0.fire_rate;
-    persistent_stats.p2.bounces = p2_base.0.bounces;
-    persistent_stats.p2.bounce_speed_multiplier = p2_base.0.bounce_speed_multiplier;
-    persistent_stats.p2.block_duration = p2_base.0.block_duration;
-    persistent_stats.p2.block_cooldown = p2_base.0.block_cooldown;
-    persistent_stats.p2.block_border_boost = p2_base.0.block_border_boost;
+    for i in 0..8 {
+        let char_settings = &p_weapon.0[i];
+        persistent_stats.players[i].movement_speed = char_settings.speed;
+        persistent_stats.players[i].health_max = char_settings.health;
+        persistent_stats.players[i].player_scale = char_settings.size;
+        persistent_stats.players[i].bullet_range = char_settings.bullet_range;
+        persistent_stats.players[i].bullet_speed = char_settings.bullet_speed;
+        persistent_stats.players[i].bullet_gravity = char_settings.bullet_gravity;
+        persistent_stats.players[i].bullet_damage = char_settings.damage;
+        persistent_stats.players[i].bullet_size_mult = char_settings.bullet_size_mult;
+        persistent_stats.players[i].bullet_growth = char_settings.bullet_growth;
+        persistent_stats.players[i].max_ammo = char_settings.max_ammo;
+        persistent_stats.players[i].reload_time = char_settings.reload_time;
+        persistent_stats.players[i].fire_rate = char_settings.fire_rate;
+        persistent_stats.players[i].bounces = char_settings.bounces;
+        persistent_stats.players[i].bounce_speed_multiplier = char_settings.bounce_speed_multiplier;
+        persistent_stats.players[i].block_duration = char_settings.block_duration;
+        persistent_stats.players[i].block_cooldown = char_settings.block_cooldown;
+        persistent_stats.players[i].block_border_boost = char_settings.block_border_boost;
+    }
 
     // Dynamic entity-component synchronization
     for (player, mut health, mut stats, mut weapon) in players_q.iter_mut() {
-        let p_stats = match player {
-            Player::P1 => &persistent_stats.p1,
-            Player::P2 => &persistent_stats.p2,
-        };
+        let p_idx = player.index();
+        let p_stats = &persistent_stats.players[p_idx];
 
         stats.movement_speed = p_stats.movement_speed;
         stats.jump_force = physics_settings.player_jump_force;
@@ -386,8 +355,7 @@ pub fn button_interaction_system(
     mut menu: ResMut<ActiveMenu>,
     mut exit: MessageWriter<AppExit>,
     mut physics_settings: ResMut<PhysicsSettings>,
-    mut p1_base: ResMut<P1WeaponSettings>,
-    mut p2_base: ResMut<P2WeaponSettings>,
+    mut p_weapon: ResMut<PlayerWeaponSettings>,
     mut persistent_stats: ResMut<PersistentPlayerStats>,
     mut kb_controls: ResMut<KeyboardControls>,
     mut ctrl_controls: ResMut<ControllerControls>,
@@ -410,10 +378,10 @@ pub fn button_interaction_system(
                     );
                     if is_control {
                         apply_control_setting(setting, &active_input.current_text, &mut kb_controls, &mut ctrl_controls);
-                        save_and_sync_settings(&physics_settings, &p1_base, &p2_base, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
+                        save_and_sync_settings(&physics_settings, &p_weapon, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
                     } else if let Ok(val) = active_input.current_text.parse::<f32>() {
-                        apply_setting_value(setting, val, &mut physics_settings, &mut p1_base, &mut p2_base);
-                        save_and_sync_settings(&physics_settings, &p1_base, &p2_base, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
+                        apply_setting_value(setting, val, &mut physics_settings, &mut p_weapon);
+                        save_and_sync_settings(&physics_settings, &p_weapon, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
                     }
                 }
                 
@@ -452,7 +420,7 @@ pub fn button_interaction_system(
                 // 2. Process settings typable inputs
                 if let Some(in_box) = input_box {
                     active_input.focused_setting = Some(in_box.0);
-                    active_input.current_text = get_setting_value(in_box.0, &physics_settings, &persistent_stats, &p1_base, &p2_base, &kb_controls, &ctrl_controls);
+                    active_input.current_text = get_setting_value(in_box.0, &physics_settings, &persistent_stats, &p_weapon, &kb_controls, &ctrl_controls);
                 }
             }
             Interaction::Hovered => {
@@ -487,8 +455,7 @@ pub fn button_interaction_system(
 pub fn settings_value_sync_system(
     physics_settings: Res<PhysicsSettings>,
     persistent_stats: Res<PersistentPlayerStats>,
-    p1_base: Res<P1WeaponSettings>,
-    p2_base: Res<P2WeaponSettings>,
+    p_weapon: Res<PlayerWeaponSettings>,
     kb_controls: Res<KeyboardControls>,
     ctrl_controls: Res<ControllerControls>,
     active_input: Res<ActiveSettingInput>,
@@ -506,7 +473,7 @@ pub fn settings_value_sync_system(
                 *border = BorderColor::all(Color::srgb(0.0, 0.83, 1.0)); // Glowing Cyan active typing border!
             }
         } else {
-            text.0 = get_setting_value(setting_type, &physics_settings, &persistent_stats, &p1_base, &p2_base, &kb_controls, &ctrl_controls);
+            text.0 = get_setting_value(setting_type, &physics_settings, &persistent_stats, &p_weapon, &kb_controls, &ctrl_controls);
             
             // Standard border
             if let Ok(mut border) = border_q.get_mut(parent.parent()) {
@@ -520,8 +487,7 @@ pub fn settings_keyboard_input_system(
     mut events: MessageReader<KeyboardInput>,
     mut active_input: ResMut<ActiveSettingInput>,
     mut physics_settings: ResMut<PhysicsSettings>,
-    mut p1_base: ResMut<P1WeaponSettings>,
-    mut p2_base: ResMut<P2WeaponSettings>,
+    mut p_weapon: ResMut<PlayerWeaponSettings>,
     mut persistent_stats: ResMut<PersistentPlayerStats>,
     mut kb_controls: ResMut<KeyboardControls>,
     mut ctrl_controls: ResMut<ControllerControls>,
@@ -553,11 +519,11 @@ pub fn settings_keyboard_input_system(
                 Key::Enter => {
                     if is_control {
                         apply_control_setting(setting, &active_input.current_text, &mut kb_controls, &mut ctrl_controls);
-                        save_and_sync_settings(&physics_settings, &p1_base, &p2_base, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
+                        save_and_sync_settings(&physics_settings, &p_weapon, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
                     } else if let Ok(val) = active_input.current_text.parse::<f32>() {
                         // Apply and sync instantly
-                        apply_setting_value(setting, val, &mut physics_settings, &mut p1_base, &mut p2_base);
-                        save_and_sync_settings(&physics_settings, &p1_base, &p2_base, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
+                        apply_setting_value(setting, val, &mut physics_settings, &mut p_weapon);
+                        save_and_sync_settings(&physics_settings, &p_weapon, &kb_controls, &ctrl_controls, &mut persistent_stats, &mut players_q);
                     }
                     active_input.focused_setting = None;
                     active_input.current_text.clear();
@@ -614,8 +580,7 @@ pub fn get_setting_value(
     setting: SettingType,
     physics: &PhysicsSettings,
     stats: &PersistentPlayerStats,
-    _p1_base: &P1WeaponSettings,
-    _p2_base: &P2WeaponSettings,
+    p_weapon: &PlayerWeaponSettings,
     kb: &KeyboardControls,
     ctrl: &ControllerControls,
 ) -> String {
@@ -651,41 +616,23 @@ pub fn get_setting_value(
         SettingType::WallContactSlopeThreshold => format!("{:.2}", physics.wall_contact_slope_threshold),
         SettingType::BulletKnockbackConstant => format!("{:.1}", physics.bullet_knockback_constant),
 
-        SettingType::P1Health => format!("{:.0}", stats.p1.health_max),
-        SettingType::P1Speed => format!("{:.0}", stats.p1.movement_speed),
-        SettingType::P1Size => format!("{:.2}", stats.p1.player_scale),
-        SettingType::P1Damage => format!("{:.1}", stats.p1.bullet_damage),
-        SettingType::P1BulletRange => format!("{:.2}", stats.p1.bullet_range),
-        SettingType::P1BulletSpeed => format!("{:.0}", stats.p1.bullet_speed),
-        SettingType::P1BulletGravity => format!("{:.0}", stats.p1.bullet_gravity),
-        SettingType::P1BulletSizeMult => format!("{:.2}", stats.p1.bullet_size_mult),
-        SettingType::P1BulletGrowth => format!("{:.1}", stats.p1.bullet_growth),
-        SettingType::P1MaxAmmo => format!("{}", stats.p1.max_ammo),
-        SettingType::P1ReloadTime => format!("{:.2}", stats.p1.reload_time),
-        SettingType::P1FireRate => format!("{:.3}", stats.p1.fire_rate),
-        SettingType::P1Bounces => format!("{}", stats.p1.bounces),
-        SettingType::P1BounceSpeedMultiplier => format!("{:.2}", stats.p1.bounce_speed_multiplier),
-        SettingType::P1BlockDuration => format!("{:.2}", stats.p1.block_duration),
-        SettingType::P1BlockCooldown => format!("{:.2}", stats.p1.block_cooldown),
-        SettingType::P1BlockBorderBoost => format!("{:.0}", stats.p1.block_border_boost),
-
-        SettingType::P2Health => format!("{:.0}", stats.p2.health_max),
-        SettingType::P2Speed => format!("{:.0}", stats.p2.movement_speed),
-        SettingType::P2Size => format!("{:.2}", stats.p2.player_scale),
-        SettingType::P2Damage => format!("{:.1}", stats.p2.bullet_damage),
-        SettingType::P2BulletRange => format!("{:.2}", stats.p2.bullet_range),
-        SettingType::P2BulletSpeed => format!("{:.0}", stats.p2.bullet_speed),
-        SettingType::P2BulletGravity => format!("{:.0}", stats.p2.bullet_gravity),
-        SettingType::P2BulletSizeMult => format!("{:.2}", stats.p2.bullet_size_mult),
-        SettingType::P2BulletGrowth => format!("{:.1}", stats.p2.bullet_growth),
-        SettingType::P2MaxAmmo => format!("{}", stats.p2.max_ammo),
-        SettingType::P2ReloadTime => format!("{:.2}", stats.p2.reload_time),
-        SettingType::P2FireRate => format!("{:.3}", stats.p2.fire_rate),
-        SettingType::P2Bounces => format!("{}", stats.p2.bounces),
-        SettingType::P2BounceSpeedMultiplier => format!("{:.2}", stats.p2.bounce_speed_multiplier),
-        SettingType::P2BlockDuration => format!("{:.2}", stats.p2.block_duration),
-        SettingType::P2BlockCooldown => format!("{:.2}", stats.p2.block_cooldown),
-        SettingType::P2BlockBorderBoost => format!("{:.0}", stats.p2.block_border_boost),
+        SettingType::PlayerHealth(idx) => format!("{:.0}", p_weapon.0[idx].health),
+        SettingType::PlayerSpeed(idx) => format!("{:.0}", p_weapon.0[idx].speed),
+        SettingType::PlayerSize(idx) => format!("{:.2}", p_weapon.0[idx].size),
+        SettingType::PlayerDamage(idx) => format!("{:.1}", p_weapon.0[idx].damage),
+        SettingType::PlayerBulletRange(idx) => format!("{:.2}", p_weapon.0[idx].bullet_range),
+        SettingType::PlayerBulletSpeed(idx) => format!("{:.0}", p_weapon.0[idx].bullet_speed),
+        SettingType::PlayerBulletGravity(idx) => format!("{:.0}", p_weapon.0[idx].bullet_gravity),
+        SettingType::PlayerBulletSizeMult(idx) => format!("{:.2}", p_weapon.0[idx].bullet_size_mult),
+        SettingType::PlayerBulletGrowth(idx) => format!("{:.1}", p_weapon.0[idx].bullet_growth),
+        SettingType::PlayerMaxAmmo(idx) => format!("{}", p_weapon.0[idx].max_ammo),
+        SettingType::PlayerReloadTime(idx) => format!("{:.2}", p_weapon.0[idx].reload_time),
+        SettingType::PlayerFireRate(idx) => format!("{:.3}", p_weapon.0[idx].fire_rate),
+        SettingType::PlayerBounces(idx) => format!("{}", p_weapon.0[idx].bounces),
+        SettingType::PlayerBounceSpeedMultiplier(idx) => format!("{:.2}", p_weapon.0[idx].bounce_speed_multiplier),
+        SettingType::PlayerBlockDuration(idx) => format!("{:.2}", p_weapon.0[idx].block_duration),
+        SettingType::PlayerBlockCooldown(idx) => format!("{:.2}", p_weapon.0[idx].block_cooldown),
+        SettingType::PlayerBlockBorderBoost(idx) => format!("{:.0}", p_weapon.0[idx].block_border_boost),
 
         SettingType::KbMoveLeft => kb.move_left.clone(),
         SettingType::KbMoveRight => kb.move_right.clone(),
@@ -729,8 +676,7 @@ pub fn apply_setting_value(
     setting: SettingType,
     val: f32,
     physics: &mut PhysicsSettings,
-    p1_base: &mut P1WeaponSettings,
-    p2_base: &mut P2WeaponSettings,
+    p_weapon: &mut PlayerWeaponSettings,
 ) {
     match setting {
         SettingType::Gravity => physics.gravity = val,
@@ -764,41 +710,23 @@ pub fn apply_setting_value(
         SettingType::WallContactSlopeThreshold => physics.wall_contact_slope_threshold = val,
         SettingType::BulletKnockbackConstant => physics.bullet_knockback_constant = val,
 
-        SettingType::P1Health => p1_base.0.health = val,
-        SettingType::P1Speed => p1_base.0.speed = val,
-        SettingType::P1Size => p1_base.0.size = val,
-        SettingType::P1Damage => p1_base.0.damage = val,
-        SettingType::P1BulletRange => p1_base.0.bullet_range = val,
-        SettingType::P1BulletSpeed => p1_base.0.bullet_speed = val,
-        SettingType::P1BulletGravity => p1_base.0.bullet_gravity = val,
-        SettingType::P1BulletSizeMult => p1_base.0.bullet_size_mult = val,
-        SettingType::P1BulletGrowth => p1_base.0.bullet_growth = val,
-        SettingType::P1MaxAmmo => p1_base.0.max_ammo = val.max(1.0) as u32,
-        SettingType::P1ReloadTime => p1_base.0.reload_time = val,
-        SettingType::P1FireRate => p1_base.0.fire_rate = val,
-        SettingType::P1Bounces => p1_base.0.bounces = val.max(0.0) as u32,
-        SettingType::P1BounceSpeedMultiplier => p1_base.0.bounce_speed_multiplier = val,
-        SettingType::P1BlockDuration => p1_base.0.block_duration = val,
-        SettingType::P1BlockCooldown => p1_base.0.block_cooldown = val,
-        SettingType::P1BlockBorderBoost => p1_base.0.block_border_boost = val,
-
-        SettingType::P2Health => p2_base.0.health = val,
-        SettingType::P2Speed => p2_base.0.speed = val,
-        SettingType::P2Size => p2_base.0.size = val,
-        SettingType::P2Damage => p2_base.0.damage = val,
-        SettingType::P2BulletRange => p2_base.0.bullet_range = val,
-        SettingType::P2BulletSpeed => p2_base.0.bullet_speed = val,
-        SettingType::P2BulletGravity => p2_base.0.bullet_gravity = val,
-        SettingType::P2BulletSizeMult => p2_base.0.bullet_size_mult = val,
-        SettingType::P2BulletGrowth => p2_base.0.bullet_growth = val,
-        SettingType::P2MaxAmmo => p2_base.0.max_ammo = val.max(1.0) as u32,
-        SettingType::P2ReloadTime => p2_base.0.reload_time = val,
-        SettingType::P2FireRate => p2_base.0.fire_rate = val,
-        SettingType::P2Bounces => p2_base.0.bounces = val.max(0.0) as u32,
-        SettingType::P2BounceSpeedMultiplier => p2_base.0.bounce_speed_multiplier = val,
-        SettingType::P2BlockDuration => p2_base.0.block_duration = val,
-        SettingType::P2BlockCooldown => p2_base.0.block_cooldown = val,
-        SettingType::P2BlockBorderBoost => p2_base.0.block_border_boost = val,
+        SettingType::PlayerHealth(idx) => p_weapon.0[idx].health = val,
+        SettingType::PlayerSpeed(idx) => p_weapon.0[idx].speed = val,
+        SettingType::PlayerSize(idx) => p_weapon.0[idx].size = val,
+        SettingType::PlayerDamage(idx) => p_weapon.0[idx].damage = val,
+        SettingType::PlayerBulletRange(idx) => p_weapon.0[idx].bullet_range = val,
+        SettingType::PlayerBulletSpeed(idx) => p_weapon.0[idx].bullet_speed = val,
+        SettingType::PlayerBulletGravity(idx) => p_weapon.0[idx].bullet_gravity = val,
+        SettingType::PlayerBulletSizeMult(idx) => p_weapon.0[idx].bullet_size_mult = val,
+        SettingType::PlayerBulletGrowth(idx) => p_weapon.0[idx].bullet_growth = val,
+        SettingType::PlayerMaxAmmo(idx) => p_weapon.0[idx].max_ammo = val.max(1.0) as u32,
+        SettingType::PlayerReloadTime(idx) => p_weapon.0[idx].reload_time = val,
+        SettingType::PlayerFireRate(idx) => p_weapon.0[idx].fire_rate = val,
+        SettingType::PlayerBounces(idx) => p_weapon.0[idx].bounces = val.max(0.0) as u32,
+        SettingType::PlayerBounceSpeedMultiplier(idx) => p_weapon.0[idx].bounce_speed_multiplier = val,
+        SettingType::PlayerBlockDuration(idx) => p_weapon.0[idx].block_duration = val,
+        SettingType::PlayerBlockCooldown(idx) => p_weapon.0[idx].block_cooldown = val,
+        SettingType::PlayerBlockBorderBoost(idx) => p_weapon.0[idx].block_border_boost = val,
         _ => {}
     }
 }
@@ -810,8 +738,7 @@ pub fn reset_and_cleanup_gameplay(
     bullets_q: Query<Entity, With<crate::physics::weapon::Projectile>>,
     particles_q: Query<Entity, With<crate::physics::particles::Particle>>,
     mut score: ResMut<ScoreTracker>,
-    p1_base: Res<P1WeaponSettings>,
-    p2_base: Res<P2WeaponSettings>,
+    p_weapon: Res<PlayerWeaponSettings>,
     mut persistent_stats: ResMut<PersistentPlayerStats>,
 ) {
     // 1. Teardown active playfield
@@ -821,47 +748,29 @@ pub fn reset_and_cleanup_gameplay(
     for entity in particles_q.iter() { commands.entity(entity).despawn(); }
 
     // 2. Reset scores
-    score.p1_wins = 0;
-    score.p2_wins = 0;
+    score.wins = [0; 8];
 
     // 3. Reset persistent statistics back to starting values from baseline resources
-    persistent_stats.p1.movement_speed = p1_base.0.speed;
-    persistent_stats.p1.health_max = p1_base.0.health;
-    persistent_stats.p1.player_scale = p1_base.0.size;
-    persistent_stats.p1.bullet_range = p1_base.0.bullet_range;
-    persistent_stats.p1.bullet_speed = p1_base.0.bullet_speed;
-    persistent_stats.p1.bullet_gravity = p1_base.0.bullet_gravity;
-    persistent_stats.p1.bullet_damage = p1_base.0.damage;
-    persistent_stats.p1.bullet_size_mult = p1_base.0.bullet_size_mult;
-    persistent_stats.p1.bullet_growth = p1_base.0.bullet_growth;
-    persistent_stats.p1.max_ammo = p1_base.0.max_ammo;
-    persistent_stats.p1.reload_time = p1_base.0.reload_time;
-    persistent_stats.p1.fire_rate = p1_base.0.fire_rate;
-    persistent_stats.p1.bounces = p1_base.0.bounces;
-    persistent_stats.p1.bounce_speed_multiplier = p1_base.0.bounce_speed_multiplier;
-    persistent_stats.p1.block_duration = p1_base.0.block_duration;
-    persistent_stats.p1.block_cooldown = p1_base.0.block_cooldown;
-    persistent_stats.p1.block_border_boost = p1_base.0.block_border_boost;
-    persistent_stats.p1.special_effects = p1_base.0.special_effects.clone();
-    persistent_stats.p1.cards.clear();
-
-    persistent_stats.p2.movement_speed = p2_base.0.speed;
-    persistent_stats.p2.health_max = p2_base.0.health;
-    persistent_stats.p2.player_scale = p2_base.0.size;
-    persistent_stats.p2.bullet_range = p2_base.0.bullet_range;
-    persistent_stats.p2.bullet_speed = p2_base.0.bullet_speed;
-    persistent_stats.p2.bullet_gravity = p2_base.0.bullet_gravity;
-    persistent_stats.p2.bullet_damage = p2_base.0.damage;
-    persistent_stats.p2.bullet_size_mult = p2_base.0.bullet_size_mult;
-    persistent_stats.p2.bullet_growth = p2_base.0.bullet_growth;
-    persistent_stats.p2.max_ammo = p2_base.0.max_ammo;
-    persistent_stats.p2.reload_time = p2_base.0.reload_time;
-    persistent_stats.p2.fire_rate = p2_base.0.fire_rate;
-    persistent_stats.p2.bounces = p2_base.0.bounces;
-    persistent_stats.p2.bounce_speed_multiplier = p2_base.0.bounce_speed_multiplier;
-    persistent_stats.p2.block_duration = p2_base.0.block_duration;
-    persistent_stats.p2.block_cooldown = p2_base.0.block_cooldown;
-    persistent_stats.p2.block_border_boost = p2_base.0.block_border_boost;
-    persistent_stats.p2.special_effects = p2_base.0.special_effects.clone();
-    persistent_stats.p2.cards.clear();
+    for i in 0..8 {
+        let char_settings = &p_weapon.0[i];
+        persistent_stats.players[i].movement_speed = char_settings.speed;
+        persistent_stats.players[i].health_max = char_settings.health;
+        persistent_stats.players[i].player_scale = char_settings.size;
+        persistent_stats.players[i].bullet_range = char_settings.bullet_range;
+        persistent_stats.players[i].bullet_speed = char_settings.bullet_speed;
+        persistent_stats.players[i].bullet_gravity = char_settings.bullet_gravity;
+        persistent_stats.players[i].bullet_damage = char_settings.damage;
+        persistent_stats.players[i].bullet_size_mult = char_settings.bullet_size_mult;
+        persistent_stats.players[i].bullet_growth = char_settings.bullet_growth;
+        persistent_stats.players[i].max_ammo = char_settings.max_ammo;
+        persistent_stats.players[i].reload_time = char_settings.reload_time;
+        persistent_stats.players[i].fire_rate = char_settings.fire_rate;
+        persistent_stats.players[i].bounces = char_settings.bounces;
+        persistent_stats.players[i].bounce_speed_multiplier = char_settings.bounce_speed_multiplier;
+        persistent_stats.players[i].block_duration = char_settings.block_duration;
+        persistent_stats.players[i].block_cooldown = char_settings.block_cooldown;
+        persistent_stats.players[i].block_border_boost = char_settings.block_border_boost;
+        persistent_stats.players[i].special_effects = char_settings.special_effects.clone();
+        persistent_stats.players[i].cards.clear();
+    }
 }

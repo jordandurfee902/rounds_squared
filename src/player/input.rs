@@ -24,9 +24,10 @@ pub fn player_input(
         let mut reload = false;
         let mut block = false;
 
-        let slot = match player {
-            Player::P1 => &lobby_slots.p1,
-            Player::P2 => &lobby_slots.p2,
+        let slot = if player.index() < lobby_slots.slots.len() {
+            &lobby_slots.slots[player.index()]
+        } else {
+            &None
         };
 
         if let Some(device) = slot {
@@ -107,6 +108,7 @@ pub fn player_input(
                         if keys.pressed(KeyCode::Space) { fire = true; }
                     }
                 }
+                _ => {}
             }
         }
 
