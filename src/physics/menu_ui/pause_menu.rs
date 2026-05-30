@@ -36,8 +36,11 @@ pub fn pause_menu_state_watcher(
         for entity in existing_pause.iter() {
             commands.entity(entity).despawn();
         }
-        for entity in existing_settings.iter() {
-            commands.entity(entity).despawn();
+        let s = *state.get();
+        if s != GameState::Lobby && s != GameState::MainMenu {
+            for entity in existing_settings.iter() {
+                commands.entity(entity).despawn();
+            }
         }
         return;
     }
@@ -59,7 +62,7 @@ pub fn pause_menu_state_watcher(
     let has_settings = !existing_settings.is_empty();
 
     if should_show_settings && !has_settings {
-        super::settings_menu::spawn_settings_menu(&mut commands, false); // in-pause settings
+        super::settings_menu::spawn_settings_menu(&mut commands, false, false); // in-pause settings
     } else if (!should_show_settings || *state.get() != GameState::Gameplay) && has_settings {
         for entity in existing_settings.iter() {
             commands.entity(entity).despawn();

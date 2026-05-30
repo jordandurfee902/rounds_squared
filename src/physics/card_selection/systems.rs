@@ -9,6 +9,7 @@ pub fn check_player_death(
     players_query: Query<(Entity, &Player, &Health)>,
     proj_query: Query<Entity, With<Projectile>>,
     particle_query: Query<Entity, With<crate::physics::particles::Particle>>,
+    physics_query: Query<Entity, Or<(With<crate::physics::Platform>, With<crate::physics::components::MovingPlatform>, With<crate::physics::components::PhysicsObject>, With<crate::physics::components::RopeSwing>)>>,
     mut score: ResMut<crate::settings::ScoreTracker>,
     mut active_map: ResMut<crate::maps::ActiveMap>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -66,6 +67,11 @@ pub fn check_player_death(
             commands.entity(particle_entity).despawn();
         }
 
+        // Clean up all physics objects, platforms, moving platforms, and swing ropes
+        for entity in physics_query.iter() {
+            commands.entity(entity).despawn();
+        }
+
         let all_players: Vec<Player> = players_query.iter().map(|(_, &p, _)| p).collect();
         let defeated: Vec<Player> = all_players.iter()
             .filter(|&&p| Some(p) != winner)
@@ -106,31 +112,19 @@ pub fn spawn_card_selection_ui(
     commands: &mut Commands,
     state: &CardSelectionState,
 ) {
-    let x_offsets = [-1140.0, -570.0, 0.0, 570.0, 1140.0];
+    let x_offsets = [-2280.0, -1140.0, 0.0, 1140.0, 2280.0];
 
     let title_color = state.selecting_player.color();
-    let title_text = format!("{:?} DEFEATED - CHOOSE A MODIFIER CARD", state.selecting_player);
+    let title_text = format!("{:?} WAS DEFEATED - SELECT A CARD", state.selecting_player);
 
     commands.spawn((
         Text2d::new(title_text),
         TextFont {
-            font_size: 40.0,
+            font_size: 180.0,
             ..default()
         },
         TextColor(title_color),
-        Transform::from_xyz(0.0, 390.0, 20.0),
-        SelectionHeaderComponent,
-    ));
-
-    // Spawn Sub-prompt
-    commands.spawn((
-        Text2d::new("Use A/D or Arrow Keys to navigate | Space or Enter to select"),
-        TextFont {
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.6, 0.6, 0.6)),
-        Transform::from_xyz(0.0, 330.0, 20.0),
+        Transform::from_xyz(0.0, 780.0, 20.0),
         SelectionHeaderComponent,
     ));
 
@@ -142,7 +136,7 @@ pub fn spawn_card_selection_ui(
 
         // Apply a highly responsive arched hand layout, rotating OUTWARDS like a fan
         let angle = -(i as f32 - 2.0) * 0.05;
-        let y_pos = -20.0 * (i as f32 - 2.0).abs().powi(2) - 100.0;
+        let y_pos = -40.0 * (i as f32 - 2.0).abs().powi(2) - 200.0;
 
         commands.spawn((
             CardSelectionUiComponent { index: i },
@@ -154,27 +148,27 @@ pub fn spawn_card_selection_ui(
             parent.spawn((
                 Text2d::new(card_def.name()),
                 TextFont {
-                    font_size: 42.0,
+                    font_size: 84.0,
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 1.0, 1.0)),
-                Transform::from_xyz(0.0, 290.0, 1.0),
+                Transform::from_xyz(0.0, 580.0, 1.0),
             ));
 
             // Description Text
             parent.spawn((
                 Text2d::new(card_def.desc()),
                 TextFont {
-                    font_size: 24.0,
+                    font_size: 48.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.7)),
-                Transform::from_xyz(0.0, 150.0, 1.0),
+                Transform::from_xyz(0.0, 300.0, 1.0),
             ));
 
             // Stat Modifications lines
             for (stat_idx, stat_line) in card_def.stat_lines().iter().enumerate() {
-                let y_pos = -30.0 - (stat_idx as f32 * 55.0);
+                let y_pos = -60.0 - (stat_idx as f32 * 110.0);
                 let text_color = if stat_line.starts_with('+') || stat_line.contains("Adds") {
                     Color::srgb(0.3, 0.9, 0.3) // Glowing neon green for buffs!
                 } else {
@@ -184,7 +178,7 @@ pub fn spawn_card_selection_ui(
                 parent.spawn((
                     Text2d::new(*stat_line),
                     TextFont {
-                        font_size: 26.0,
+                        font_size: 52.0,
                         ..default()
                     },
                     TextColor(text_color),
@@ -216,7 +210,7 @@ pub fn draw_card_gizmos(
     state: Res<CardSelectionState>,
     query: Query<(&Transform, &CardSelectionUiComponent)>,
 ) {
-    let card_size = Vec2::new(465.0, 750.0);
+    let card_size = Vec2::new(930.0, 1500.0);
 
     for (transform, comp) in query.iter() {
         let center = transform.translation.xy();
@@ -227,11 +221,13 @@ pub fn draw_card_gizmos(
 
         if is_hovered {
             let hover_color = state.selecting_player.color();
+            let scaled_size = card_size * transform.scale.xy();
             // Double outline swept rotated frames
-            draw_rotated_rect(&mut gizmos, center, card_size, angle, hover_color);
-            draw_rotated_rect(&mut gizmos, center, card_size + Vec2::new(8.0, 8.0), angle, hover_color);
+            draw_rotated_rect(&mut gizmos, center, scaled_size, angle, hover_color);
+            draw_rotated_rect(&mut gizmos, center, scaled_size + Vec2::new(16.0, 16.0) * transform.scale.xy(), angle, hover_color);
         } else {
-            draw_rotated_rect(&mut gizmos, center, card_size, angle, Color::srgb(0.2, 0.2, 0.2));
+            let scaled_size = card_size * transform.scale.xy();
+            draw_rotated_rect(&mut gizmos, center, scaled_size, angle, Color::srgb(0.2, 0.2, 0.2));
         }
     }
 }
@@ -357,8 +353,8 @@ pub fn card_selection_input(
 
     if confirm {
         // Apply selected stats modifiers to the selecting player
-        let p_stats = &mut persistent_stats.players[state.selecting_player.index()];
-
+        let p_idx = state.selecting_player.index();
+        let p_stats = &mut persistent_stats.players[p_idx];
         let card_idx = state.drawn_cards[state.selected_idx];
         p_stats.cards.push(card_idx);
 
@@ -396,5 +392,33 @@ pub fn card_selection_input(
             // No more players, return to gameplay
             next_state.set(GameState::Gameplay);
         }
+    }
+}
+
+pub fn animate_card_selection(
+    time: Res<Time>,
+    state: Option<Res<CardSelectionState>>,
+    mut query: Query<(&mut Transform, &CardSelectionUiComponent)>,
+) {
+    let Some(state) = state else { return; };
+    let x_offsets = [-2280.0, -1140.0, 0.0, 1140.0, 2280.0];
+
+    for (mut transform, comp) in query.iter_mut() {
+        let i = comp.index;
+        let x_pos = x_offsets[i];
+
+        // Base fanned layout angle and Y position
+        let angle = -(i as f32 - 2.0) * 0.05;
+        let y_pos = -40.0 * (i as f32 - 2.0).abs().powi(2) - 200.0;
+
+        let is_hovered = state.selected_idx == i;
+
+        // Hover scale lerp
+        let target_scale = if is_hovered { 1.08 } else { 1.0 };
+        transform.scale = transform.scale.lerp(Vec3::splat(target_scale), time.delta_secs() * 15.0);
+
+        transform.translation.x = x_pos;
+        transform.translation.y = y_pos;
+        transform.rotation = Quat::from_rotation_z(angle);
     }
 }

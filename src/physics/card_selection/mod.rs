@@ -17,6 +17,7 @@ impl Plugin for CardSelectionPlugin {
            .add_systems(OnExit(GameState::CardSelection), cleanup_card_selection)
            .add_systems(Update, (
                card_selection_input.run_if(resource_equals(crate::net::IsNetworked(false))),
+               animate_card_selection,
                draw_card_gizmos,
            ).run_if(in_state(GameState::CardSelection)));
     }

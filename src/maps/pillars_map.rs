@@ -34,4 +34,47 @@ pub fn spawn_pillars_map(
     // 6. Sky islands
     spawn_platform(commands, meshes, materials, Vec2::new(400.0, 35.0), Vec3::new(-700.0, 600.0, 5.0), platform_color);
     spawn_platform(commands, meshes, materials, Vec2::new(400.0, 35.0), Vec3::new(700.0, 600.0, 5.0), platform_color);
+
+    // --- Overhaul Map Additions: Vertical Moving Platforms ---
+    let size = Vec2::new(200.0, 30.0) * 2.0;
+
+    let left_pos = Vec2::new(-950.0, 0.0) * 2.0;
+    commands.spawn((
+        crate::physics::components::Platform,
+        crate::physics::components::Collider::Rect { size },
+        Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
+        MeshMaterial2d(materials.add(Color::srgb(0.2, 0.6, 0.4))),
+        Transform::from_translation(left_pos.extend(5.0)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        crate::physics::components::MovingPlatform {
+            id: 2,
+            initial_pos: left_pos,
+            amplitude: Vec2::new(0.0, 300.0) * 2.0,
+            frequency: Vec2::new(0.0, 1.2),
+            spin_speed: 0.0,
+            current_rotation: 0.0,
+        },
+    ));
+
+    let right_pos = Vec2::new(950.0, 0.0) * 2.0;
+    commands.spawn((
+        crate::physics::components::Platform,
+        crate::physics::components::Collider::Rect { size },
+        Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
+        MeshMaterial2d(materials.add(Color::srgb(0.2, 0.6, 0.4))),
+        Transform::from_translation(right_pos.extend(5.0)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        crate::physics::components::MovingPlatform {
+            id: 3,
+            initial_pos: right_pos,
+            amplitude: Vec2::new(0.0, -300.0) * 2.0,
+            frequency: Vec2::new(0.0, 1.2),
+            spin_speed: 0.0,
+            current_rotation: 0.0,
+        },
+    ));
 }

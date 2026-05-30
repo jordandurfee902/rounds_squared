@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::player::{Player, Health};
-use crate::physics::components::{Collider, Platform, Velocity};
+use crate::physics::components::{Collider, Platform, Velocity, Mass};
 use crate::graphics::{TARGET_WIDTH, TARGET_HEIGHT};
 use crate::settings::PhysicsSettings;
 use crate::physics::particles::spawn_damage_explosion;
@@ -22,6 +22,7 @@ pub fn projectile_physics_system(
     mut projectiles: Query<(Entity, &mut Transform, &mut Projectile), (Without<Platform>, Without<Player>)>,
     platforms: Query<(&Transform, &Collider), (With<Platform>, Without<Projectile>, Without<Player>)>,
     mut players: Query<(Entity, &Transform, &Collider, &Player, &mut Health, &crate::player::PlayerStatsComponent, &crate::player::BlockComponent, &mut Velocity), (Without<Projectile>, Without<Platform>)>,
+    mut physics_objects: Query<(Entity, &mut Transform, &mut Velocity, &Collider, &Mass, &mut crate::physics::components::PhysicsObject), (Without<Projectile>, Without<Platform>, Without<Player>)>,
     settings: Res<PhysicsSettings>,
     mut shake: ResMut<crate::graphics::ScreenShake>,
     persistent_stats: Option<Res<crate::settings::PersistentPlayerStats>>,
@@ -175,6 +176,87 @@ pub fn projectile_physics_system(
                     }
                     break;
                 }
+            }
+        }
+
+        if hit_detected {
+            trigger_impact_shake(proj.damage, &mut shake);
+            for &card_idx in owner_cards.iter() {
+                if let Some(card) = crate::physics::card_selection::cards::get_card(card_idx) {
+                    card.on_bullet_land(&mut commands, &proj, land_pos);
+                }
+            }
+            commands.entity(proj_entity).despawn();
+            continue;
+        }
+
+        // 3b. Collision Check: Dynamic Physics Objects
+        let mut object_hit = None;
+        for (obj_entity, mut obj_trans, mut obj_vel, obj_coll, obj_mass, mut obj) in physics_objects.iter_mut() {
+            let obj_pos = obj_trans.translation.xy();
+            let mut hit = false;
+            let mut contact_point = Vec2::ZERO;
+
+            match obj_coll {
+                Collider::Circle { radius: o_r } => {
+                    let combined_r = o_r + bullet_radius;
+                    if curr_pos.distance_squared(obj_pos) <= combined_r * combined_r {
+                        hit = true;
+                        contact_point = curr_pos;
+                    }
+                }
+                Collider::Rect { size: o_size } => {
+                    let half_size = o_size / 2.0;
+                    let clamped_x = curr_pos.x.clamp(obj_pos.x - half_size.x, obj_pos.x + half_size.x);
+                    let clamped_y = curr_pos.y.clamp(obj_pos.y - half_size.y, obj_pos.y + half_size.y);
+                    let closest_point = Vec2::new(clamped_x, clamped_y);
+                    if curr_pos.distance_squared(closest_point) <= bullet_radius * bullet_radius {
+                        hit = true;
+                        contact_point = closest_point;
+                    }
+                }
+            }
+
+            if hit {
+                object_hit = Some((obj_entity, contact_point));
+                
+                // Apply knockback to the object
+                let knockback_dir = proj.velocity.normalize_or_zero();
+                let knockback_mag = proj.damage.sqrt() * settings.bullet_knockback_constant * 1.5;
+                obj_vel.0 += knockback_dir * (knockback_mag / obj_mass.0);
+
+                // Handle damage for destructible hollow squares
+                if obj.obj_type == crate::physics::components::PhysicsObjectType::HollowSquare {
+                    obj.health = (obj.health - proj.damage).max(0.0);
+                    spawn_damage_explosion(&mut commands, contact_point, Color::srgb(1.0, 0.7, 0.2), proj.damage, rng_seed + 150);
+                    if obj.health <= 0.0 {
+                        spawn_damage_explosion(&mut commands, obj_pos, Color::srgb(1.0, 0.4, 0.1), proj.damage * 3.0, rng_seed + 200);
+                        commands.entity(obj_entity).despawn();
+                    }
+                } else {
+                    spawn_damage_explosion(&mut commands, contact_point, Color::srgb(0.2, 0.7, 1.0), proj.damage, rng_seed + 150);
+                }
+                break;
+            }
+        }
+
+        if let Some((_, contact_p)) = object_hit {
+            if proj.bounces > 0 {
+                let diff = curr_pos - contact_p;
+                let normal = if diff.length_squared() > 1e-4 {
+                    diff.normalize()
+                } else {
+                    -proj.velocity.normalize_or_zero()
+                };
+                let reflected = proj.velocity - 2.0 * proj.velocity.dot(normal) * normal;
+                proj.velocity = reflected * proj.bounce_speed_multiplier;
+                proj.bounces -= 1;
+                let new_pos = contact_p + normal * (bullet_radius + 1.0);
+                proj_transform.translation.x = new_pos.x;
+                proj_transform.translation.y = new_pos.y;
+            } else {
+                hit_detected = true;
+                land_pos = contact_p;
             }
         }
 

@@ -40,7 +40,7 @@ pub struct HostSystemResources<'w, 's> {
 }
 
 pub fn host_network_system(
-    mut resources: HostSystemResources,
+    resources: HostSystemResources,
     mut players: Query<(
         &Player,
         &mut Transform,
@@ -60,6 +60,8 @@ pub fn host_network_system(
     local_input: LocalInput,
     mut gamepad_cooldown: Local<f32>,
     gravity_wells_query: Query<(&Transform, &crate::physics::card_selection::cards::gravity_vortex::GravityWell), Without<Player>>,
+    moving_platforms_query: Query<(&crate::physics::components::MovingPlatform, &Transform), (Without<Player>, Without<Projectile>)>,
+    physics_objects_query: Query<(&crate::physics::components::PhysicsObject, &Transform, &Velocity), (Without<Player>, Without<Projectile>)>,
 ) {
     let HostSystemResources {
         mut commands,
@@ -80,12 +82,13 @@ pub fn host_network_system(
     };
     socket.update_peers();
 
-    let local_id = socket.id().expect("Socket should have an ID");
+    let Some(local_id) = socket.id() else {
+        return;
+    };
+    let mut clients: Vec<_> = socket.connected_peers().collect();
+    clients.sort_by_key(|id| id.to_string());
     let mut all_ids = vec![local_id];
-    for peer in socket.connected_peers() {
-        all_ids.push(peer);
-    }
-    all_ids.sort_by_key(|id| id.to_string());
+    all_ids.extend(clients);
 
     // 1. Receive client inputs from all client peers
     let mut client_packets: [Option<ClientInputPacket>; 8] = [None, None, None, None, None, None, None, None];
@@ -245,7 +248,7 @@ pub fn host_network_system(
     }
 
     // Apply inputs to players
-    for (player, mut transform, mut vel, mut health, mut _stats, mut block, mut weapon, mut aim, mut input, mut grounded, mut _wall, mut _jump_allow) in players.iter_mut() {
+    for (player, _transform, _vel, _health, _stats, _block, _weapon, mut aim, mut input, _grounded, _wall, _jump_allow) in players.iter_mut() {
         let p_idx = player.index();
         if p_idx == 0 {
             input.move_dir = p1_move_dir;
@@ -281,9 +284,11 @@ pub fn host_network_system(
                 }
 
                 if p1_card_confirm {
-                    let p_stats = &mut persistent_stats.players[0];
-                    apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
-                    
+                    let card_idx = cs.drawn_cards[cs.selected_idx];
+                    let p_idx = cs.selecting_player.index();
+                    let p_stats = &mut persistent_stats.players[p_idx];
+                    apply_card_selection_effect(p_stats, card_idx);
+
                     if let Some(ref mut rng) = rollback_rng {
                         if !cs.queue.is_empty() {
                             let next_player = cs.queue.remove(0);
@@ -333,8 +338,10 @@ pub fn host_network_system(
                             }
 
                             if pkt.card_confirm {
-                                let p_stats = &mut persistent_stats.players[i];
-                                apply_card_selection_effect(p_stats, cs.drawn_cards[cs.selected_idx]);
+                                let card_idx = cs.drawn_cards[cs.selected_idx];
+                                let p_idx = cs.selecting_player.index();
+                                let p_stats = &mut persistent_stats.players[p_idx];
+                                apply_card_selection_effect(p_stats, card_idx);
 
                                 if let Some(ref mut rng) = rollback_rng {
                                     if !cs.queue.is_empty() {
@@ -438,6 +445,28 @@ pub fn host_network_system(
         });
     }
 
+    let mut moving_platforms = Vec::new();
+    for (mp, trans) in moving_platforms_query.iter() {
+        let (_, _, theta) = trans.rotation.to_euler(EulerRot::XYZ);
+        moving_platforms.push(super::MovingPlatformNetState {
+            id: mp.id,
+            pos: trans.translation.xy(),
+            rotation: theta,
+        });
+    }
+
+    let mut physics_objects = Vec::new();
+    for (po, trans, vel) in physics_objects_query.iter() {
+        let (_, _, theta) = trans.rotation.to_euler(EulerRot::XYZ);
+        physics_objects.push(super::PhysicsObjectNetState {
+            id: po.id,
+            pos: trans.translation.xy(),
+            vel: vel.0,
+            rotation: theta,
+            health: po.health,
+        });
+    }
+
     let mut active_players = [false; 8];
     let mut is_gamepad = [false; 8];
     for i in 0..8 {
@@ -461,6 +490,8 @@ pub fn host_network_system(
         poison_clouds: Vec::new(),
         explosion_events,
         gravity_wells,
+        moving_platforms,
+        physics_objects,
         wins: score_tracker.wins,
         active_players,
         is_gamepad,

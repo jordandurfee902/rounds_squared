@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::physics::{Collider, Velocity, Acceleration, Grounded, WallContact, JumpAllowance, Mass};
+use crate::physics::{Collider, Velocity, Acceleration, Grounded, WallContact, JumpAllowance, Mass, StandingOn};
 use crate::physics::weapon::Weapon;
 use crate::physics::anim::ProceduralLimbs;
 use crate::settings::{PersistentPlayerStats, PhysicsSettings, LobbySlots};
@@ -63,8 +63,8 @@ pub fn spawn_players(
 
         let side = if i % 2 == 0 { -1.0 } else { 1.0 };
         let step = (i / 2) as f32;
-        let spawn_x = side * (base_x - step * 150.0);
-        let spawn_y = base_y + step * 50.0;
+        let spawn_x = side * (base_x * 2.0 - step * 150.0 * 2.0);
+        let spawn_y = base_y * 2.0 + step * 50.0 * 2.0;
         let spawn_pos = Vec3::new(spawn_x, spawn_y, 10.0);
 
         let p_color = player.color();
@@ -81,6 +81,7 @@ pub fn spawn_players(
             Grounded(true),
             WallContact::default(),
             JumpAllowance { value: physics_settings.max_jump_allowance },
+            StandingOn(None),
         )).insert((
             crate::physics::components::ControllerInput::default(),
             Mass(physics_settings.player_base_mass),

@@ -287,7 +287,21 @@ pub fn online_menu_button_system(
                         let formatted_code = format!("{} {}", &code[..3], &code[3..]);
                         copy_to_clipboard(&formatted_code);
                         
-                        state.set(GameState::Matchmaking);
+                        // Connect socket immediately as host
+                        info!("HOST: Starting private match socket on room code: {}", code);
+                        let room_url = format!("wss://durfdog-sets.hf.space/room_{}?next=8", code);
+                        let (socket, message_loop) = matchbox_socket::WebRtcSocket::builder(&room_url)
+                            .add_channel(matchbox_socket::ChannelConfig::unreliable())
+                            .build();
+                        bevy::tasks::IoTaskPool::get().spawn(message_loop).detach();
+                        commands.insert_resource(crate::net::MatchboxSocketResource(socket));
+                        
+                        // Set host net resources
+                        commands.insert_resource(crate::net::LocalPlayerIndex(0));
+                        commands.insert_resource(crate::net::IsNetworked(true));
+                        commands.insert_resource(crate::net::RollbackRng::new(98765));
+
+                        state.set(GameState::Lobby);
                     }
                     OnlineMenuButton::JoinGame => {
                         if let Some(ref mut typing) = typing_res {

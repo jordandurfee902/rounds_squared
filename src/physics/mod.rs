@@ -8,6 +8,7 @@ pub mod card_selection;
 pub mod card_list_ui;
 pub mod menu_ui;
 pub mod lobby_ui;
+pub mod physics_objects;
 
 pub use components::*;
 pub use forces::*;
@@ -31,20 +32,31 @@ impl Plugin for PhysicsPlugin {
         app.add_systems(Update, (
             apply_acceleration,
             apply_gravity_and_movement,
+            physics_objects::apply_physics_object_physics,
             player_movement,
             crate::player::player_block_system,
             apply_friction,
             apply_velocity,
+            physics_objects::update_moving_platforms,
+            physics_objects::update_rope_swing,
             reset_collision_states,
             boundary_collision,
             player_collision,
             player_platform_collision,
+            physics_objects::resolve_physics_object_collisions,
             weapon::weapon_update_system,
             weapon::weapon_fire_system,
             weapon::projectile_physics_system,
             card_selection::cards::gravity_vortex::gravity_well_system,
             crate::physics::card_selection::check_player_death,
         ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(run_physics_simulation)));
+
+        // Client-side prediction & interpolation for smooth visual updates when physics simulation is off
+        app.add_systems(Update, (
+            apply_velocity,
+            physics_objects::update_moving_platforms,
+            physics_objects::update_rope_swing,
+        ).chain().run_if(in_state(GameState::Gameplay).and(is_not_paused).and(not(run_physics_simulation))));
 
         // Network synchronization systems (run in all online states)
         app.add_systems(Update, (
@@ -57,6 +69,7 @@ impl Plugin for PhysicsPlugin {
             particles::update_particles,
             weapon::draw_projectiles,
             card_selection::cards::gravity_vortex::draw_gravity_wells,
+            physics_objects::draw_physics_object_gizmos,
         ).run_if(in_state(GameState::Gameplay).and(is_not_paused)));
 
         // Noodle drawing and visual systems (continue running while paused to draw visual frames)
@@ -65,6 +78,7 @@ impl Plugin for PhysicsPlugin {
             update_and_draw_legs,
             draw_procedural_arms,
             draw_expressive_faces,
+            draw_rope_lines,
         ).chain().after(player_platform_collision).run_if(in_state(GameState::Gameplay)));
 
         // Draw score UI overlay during all game states (Gameplay and Card Selection)
@@ -73,12 +87,13 @@ impl Plugin for PhysicsPlugin {
 }
 
 fn reset_collision_states(
-    mut query: Query<(&mut Grounded, &mut WallContact)>,
+    mut query: Query<(&mut Grounded, &mut WallContact, &mut StandingOn)>,
 ) {
-    for (mut grounded, mut wall) in query.iter_mut() {
+    for (mut grounded, mut wall, mut standing_on) in query.iter_mut() {
         grounded.0 = false;
         wall.left = false;
         wall.right = false;
+        standing_on.0 = None;
     }
 }
 

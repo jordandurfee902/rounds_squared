@@ -13,8 +13,8 @@ pub fn draw_score_overlay(
     }
     let half_width = TARGET_WIDTH / 2.0;
     let half_height = TARGET_HEIGHT / 2.0;
-    let radius = 18.0; // Larger size to look very premium
-    let spacing = 48.0; // Larger spacing to comfortably fit the larger size
+    let radius = 36.0; // Larger size to look very premium
+    let spacing = 96.0; // Larger spacing to comfortably fit the larger size
 
     let mut active_indices = Vec::new();
     for i in 0..8 {
@@ -30,11 +30,11 @@ pub fn draw_score_overlay(
     for (row_idx, &p_idx) in active_indices.iter().enumerate() {
         let player = crate::player::Player::from_index(p_idx);
         let p_color = player.color();
-        let p_y = half_height - (50.0 + row_idx as f32 * 50.0);
+        let p_y = half_height - (100.0 + row_idx as f32 * 100.0);
         let wins = score.wins[p_idx];
 
         for i in 0..wins {
-            let pos = Vec2::new(-half_width + 45.0 + i as f32 * spacing, p_y);
+            let pos = Vec2::new(-half_width + 90.0 + i as f32 * spacing, p_y);
             let max_r = radius as i32;
             for r in 0..=max_r {
                 gizmos.circle_2d(pos, r as f32, p_color);

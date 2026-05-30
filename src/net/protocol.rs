@@ -75,12 +75,30 @@ pub struct GravityWellNetState {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MovingPlatformNetState {
+    pub id: u32,
+    pub pos: Vec2,
+    pub rotation: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PhysicsObjectNetState {
+    pub id: u32,
+    pub pos: Vec2,
+    pub vel: Vec2,
+    pub rotation: f32,
+    pub health: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HostStatePacket {
     pub players: Vec<PlayerNetState>, // length matches number of spawned players, or fixed length 8
     pub bullets: Vec<BulletNetState>,
     pub poison_clouds: Vec<PoisonCloudNetState>,
     pub explosion_events: Vec<ExplosionEvent>,
     pub gravity_wells: Vec<GravityWellNetState>,
+    pub moving_platforms: Vec<MovingPlatformNetState>,
+    pub physics_objects: Vec<PhysicsObjectNetState>,
     pub wins: [u32; 8],
     pub active_players: [bool; 8],
     pub is_gamepad: [bool; 8],

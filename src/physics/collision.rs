@@ -196,34 +196,50 @@ pub fn player_collision(
 
 pub fn player_platform_collision(
     settings: Res<PhysicsSettings>,
-    mut players: Query<(&mut Transform, &mut Velocity, &Collider, &mut Grounded, &mut WallContact), Without<Platform>>,
-    platforms: Query<(&Transform, &Collider), With<Platform>>,
+    mut players: Query<(&mut Transform, &mut Velocity, &Collider, &mut Grounded, &mut WallContact, &mut StandingOn), Without<Platform>>,
+    platforms: Query<(Entity, &Transform, &Collider), With<Platform>>,
 ) {
     let restitution = settings.boundary_restitution;
 
-    for (mut p_trans, mut p_vel, p_coll, mut grounded, mut wall) in players.iter_mut() {
+    for (mut p_trans, mut p_vel, p_coll, mut grounded, mut wall, mut standing_on) in players.iter_mut() {
         if let Collider::Circle { radius } = p_coll {
-            for (plat_trans, plat_coll) in platforms.iter() {
+            for (plat_ent, plat_trans, plat_coll) in platforms.iter() {
                 if let Collider::Rect { size } = plat_coll {
                     let player_pos = p_trans.translation.xy();
                     let plat_pos = plat_trans.translation.xy();
-                    let half_size = *size / 2.0;
+                    let plat_rot = plat_trans.rotation;
+                    let (_, _, theta) = plat_rot.to_euler(EulerRot::XYZ);
 
-                    let closest = Vec2::new(
-                        player_pos.x.clamp(plat_pos.x - half_size.x, plat_pos.x + half_size.x),
-                        player_pos.y.clamp(plat_pos.y - half_size.y, plat_pos.y + half_size.y),
+                    let diff = player_pos - plat_pos;
+                    let cos_t = (-theta).cos();
+                    let sin_t = (-theta).sin();
+                    let player_local = Vec2::new(
+                        diff.x * cos_t - diff.y * sin_t,
+                        diff.x * sin_t + diff.y * cos_t,
                     );
 
-                    let dist_sq = player_pos.distance_squared(closest);
-                    let dist = dist_sq.sqrt();
+                    let half_size = *size / 2.0;
+                    let closest_local = Vec2::new(
+                        player_local.x.clamp(-half_size.x, half_size.x),
+                        player_local.y.clamp(-half_size.y, half_size.y),
+                    );
+
+                    let dist = player_local.distance(closest_local);
 
                     // Perform check using contact skin/buffer from settings
                     if dist <= *radius + settings.collision_penetration_skin_buffer {
-                        let normal = if dist > 0.0 {
-                            (player_pos - closest) / dist
+                        let normal_local = if dist > 0.0 {
+                            (player_local - closest_local) / dist
                         } else {
                             Vec2::Y
                         };
+
+                        let cos_w = theta.cos();
+                        let sin_w = theta.sin();
+                        let normal = Vec2::new(
+                            normal_local.x * cos_w - normal_local.y * sin_w,
+                            normal_local.x * sin_w + normal_local.y * cos_w,
+                        );
 
                         // Only resolve physical overlap if they actually penetrate
                         if dist < *radius {
@@ -234,6 +250,7 @@ pub fn player_platform_collision(
                         // Stable ground contact: normal points mostly up
                         if normal.y > settings.grounded_slope_threshold {
                             grounded.0 = true;
+                            standing_on.0 = Some(plat_ent);
                         }
 
                         // Stable wall contacts:

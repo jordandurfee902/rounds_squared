@@ -30,10 +30,11 @@ struct LobbyStatusText(usize);
 #[derive(Component)]
 struct LobbyPromptText;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum LobbyButtonAction {
     StartGame,
     OpenSettings,
+    LeaveLobby,
 }
 
 // --- Helper for Player Colors ---
@@ -59,6 +60,7 @@ fn setup_lobby_ui(
     mut lobby_slots: ResMut<LobbySlots>,
     is_networked_opt: Option<Res<crate::net::IsNetworked>>,
     local_idx_opt: Option<Res<crate::net::LocalPlayerIndex>>,
+    code_res_opt: Option<Res<crate::net::OnlineCodeResource>>,
 ) {
     let is_networked = is_networked_opt.map(|n| n.0).unwrap_or(false);
     let local_idx = local_idx_opt.map(|idx| idx.0).unwrap_or(0);
@@ -79,6 +81,21 @@ fn setup_lobby_ui(
         if is_host { "ONLINE LOBBY (HOST)" } else { "ONLINE LOBBY (CLIENT)" }
     } else {
         "LOCAL LOBBY"
+    };
+
+    let room_code_text = if let Some(code_res) = code_res_opt {
+        if !code_res.code.is_empty() {
+            let formatted_code = if code_res.code.len() >= 6 {
+                format!("{} {}", &code_res.code[..3], &code_res.code[3..])
+            } else {
+                code_res.code.clone()
+            };
+            Some(format!("ROOM CODE: {}", formatted_code))
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     commands.spawn((
@@ -108,6 +125,22 @@ fn setup_lobby_ui(
                 ..default()
             },
         ));
+
+        // Room Code if present
+        if let Some(code_text) = room_code_text {
+            parent.spawn((
+                Text::new(code_text),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.55, 0.04)),
+                Node {
+                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
+                    ..default()
+                },
+            ));
+        }
 
         // Subtitle Instructions
         let sub_text = if is_networked {
@@ -203,23 +236,33 @@ fn setup_lobby_ui(
                 margin: UiRect { top: Val::Px(40.0), ..default() },
                 ..default()
             }).with_children(|btns| {
+                spawn_lobby_button(btns, "LEAVE LOBBY", LobbyButtonAction::LeaveLobby, Color::srgb(0.9, 0.2, 0.2));
                 spawn_lobby_button(btns, "GAME SETTINGS", LobbyButtonAction::OpenSettings, Color::srgb(1.0, 0.55, 0.04));
                 spawn_lobby_button(btns, "START GAME", LobbyButtonAction::StartGame, Color::srgb(0.0, 1.0, 0.5));
             });
         } else {
-            parent.spawn((
-                Text::new("WAITING FOR HOST TO START GAME..."),
-                TextFont {
-                    font_size: 22.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.5, 0.5, 0.5)),
-                Node {
-                    margin: UiRect { top: Val::Px(40.0), ..default() },
-                    ..default()
-                },
-                LobbyPromptText,
-            ));
+            parent.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                margin: UiRect { top: Val::Px(40.0), ..default() },
+                ..default()
+            }).with_children(|col| {
+                col.spawn((
+                    Text::new("WAITING FOR HOST TO START GAME..."),
+                    TextFont {
+                        font_size: 22.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                    Node {
+                        margin: UiRect { bottom: Val::Px(20.0), ..default() },
+                        ..default()
+                    },
+                    LobbyPromptText,
+                ));
+                spawn_lobby_button(col, "LEAVE LOBBY", LobbyButtonAction::LeaveLobby, Color::srgb(0.9, 0.2, 0.2));
+            });
         }
     });
 }
@@ -277,6 +320,7 @@ fn lobby_join_system(
     gamepads: Query<(Entity, &Gamepad)>,
     is_networked_opt: Option<Res<crate::net::IsNetworked>>,
     local_idx_opt: Option<Res<crate::net::LocalPlayerIndex>>,
+    mut commands: Commands,
 ) {
     let is_networked = is_networked_opt.map(|n| n.0).unwrap_or(false);
 
@@ -314,9 +358,13 @@ fn lobby_join_system(
             }
         }
 
-        // Return to main menu if escape is pressed
+        // Return to online lobby menu if escape is pressed
         if keys.just_pressed(KeyCode::Escape) {
-            state.set(GameState::MainMenu);
+            commands.remove_resource::<crate::net::MatchboxSocketResource>();
+            commands.remove_resource::<crate::net::HostPeerId>();
+            commands.insert_resource(crate::net::IsNetworked(false));
+            commands.insert_resource(crate::net::LocalPlayerIndex(0));
+            state.set(GameState::OnlineMenu);
         }
     } else {
         // LOCAL MULTIPLAYER LOBBY JOINING
@@ -388,9 +436,12 @@ fn lobby_button_system(
     mut next_state: ResMut<NextState<GameState>>,
     mut menu: ResMut<ActiveMenu>,
     lobby_slots: Res<LobbySlots>,
+    mut commands: Commands,
+    is_networked_opt: Option<Res<crate::net::IsNetworked>>,
 ) {
     let active_count = lobby_slots.slots.iter().filter(|s| s.is_some()).count();
     let can_start = active_count >= 2;
+    let is_networked = is_networked_opt.as_ref().map(|n| n.0).unwrap_or(false);
 
     for (interaction, mut border, mut bg, action) in interaction_query.iter_mut() {
         match *interaction {
@@ -404,12 +455,26 @@ fn lobby_button_system(
                     LobbyButtonAction::OpenSettings => {
                         menu.is_settings_open = true;
                     }
+                    LobbyButtonAction::LeaveLobby => {
+                        commands.remove_resource::<crate::net::MatchboxSocketResource>();
+                        commands.remove_resource::<crate::net::HostPeerId>();
+                        commands.insert_resource(crate::net::IsNetworked(false));
+                        commands.insert_resource(crate::net::LocalPlayerIndex(0));
+                        if is_networked {
+                            next_state.set(GameState::OnlineMenu);
+                        } else {
+                            next_state.set(GameState::MainMenu);
+                        }
+                    }
                 }
             }
             Interaction::Hovered => {
                 if matches!(action, LobbyButtonAction::StartGame) && !can_start {
                     *border = BorderColor::all(Color::srgb(0.2, 0.2, 0.2));
                     *bg = BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.5));
+                } else if matches!(action, LobbyButtonAction::LeaveLobby) {
+                    *border = BorderColor::all(Color::srgb(1.0, 1.0, 1.0));
+                    *bg = BackgroundColor(Color::srgba(0.3, 0.05, 0.05, 0.8));
                 } else {
                     *border = BorderColor::all(Color::srgb(1.0, 1.0, 1.0));
                     *bg = BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 0.8));
@@ -419,6 +484,9 @@ fn lobby_button_system(
                 if matches!(action, LobbyButtonAction::StartGame) && !can_start {
                     *border = BorderColor::all(Color::srgb(0.2, 0.2, 0.2));
                     *bg = BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.5));
+                } else if matches!(action, LobbyButtonAction::LeaveLobby) {
+                    *border = BorderColor::all(Color::srgb(0.4, 0.4, 0.4));
+                    *bg = BackgroundColor(Color::srgba(0.12, 0.04, 0.04, 0.9));
                 } else {
                     *border = BorderColor::all(Color::srgb(0.4, 0.4, 0.4));
                     *bg = BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.9));
@@ -435,7 +503,7 @@ fn lobby_render_update_system(
     lobby_slots: Res<LobbySlots>,
     mut card_query: Query<(&mut BorderColor, &mut BackgroundColor, &LobbySlotCard)>,
     mut text_query: Query<(&mut Text, &mut TextColor, &LobbyStatusText)>,
-    mut start_btn_query: Query<(&mut BackgroundColor, &mut BorderColor, &Children), (With<LobbyButtonAction>, Without<LobbySlotCard>)>,
+    mut start_btn_query: Query<(&mut BackgroundColor, &mut BorderColor, &Children, &LobbyButtonAction), Without<LobbySlotCard>>,
     mut btn_text_query: Query<&mut TextColor, (Without<LobbyStatusText>, Without<LobbySlotCard>)>,
     menu: Res<ActiveMenu>,
     existing_settings: Query<Entity, With<SettingsMenuContainer>>,
@@ -443,7 +511,7 @@ fn lobby_render_update_system(
     // 1. Manage Settings Menu Overlay
     let has_settings = !existing_settings.is_empty();
     if menu.is_settings_open && !has_settings {
-        crate::physics::menu_ui::spawn_settings_menu(&mut commands, false);
+        crate::physics::menu_ui::spawn_settings_menu(&mut commands, false, true);
     } else if !menu.is_settings_open && has_settings {
         for ent in existing_settings.iter() {
             commands.entity(ent).despawn();
@@ -491,8 +559,8 @@ fn lobby_render_update_system(
     let active_count = lobby_slots.slots.iter().filter(|s| s.is_some()).count();
     let can_start = active_count >= 2;
 
-    for (mut bg, mut border, children) in start_btn_query.iter_mut() {
-        if !can_start {
+    for (mut bg, mut border, children, action) in start_btn_query.iter_mut() {
+        if matches!(action, LobbyButtonAction::StartGame) && !can_start {
             *bg = BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.5));
             *border = BorderColor::all(Color::srgb(0.2, 0.2, 0.2));
             for child in children.iter() {

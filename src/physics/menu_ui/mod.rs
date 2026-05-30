@@ -43,6 +43,7 @@ impl Plugin for MenuUiPlugin {
            .add_systems(Update, (
                pause_input_system,
                pause_menu_state_watcher,
+               main_menu_ui_watcher.run_if(in_state(GameState::MainMenu)),
                button_interaction_system,
                settings_value_sync_system,
                settings_keyboard_input_system,

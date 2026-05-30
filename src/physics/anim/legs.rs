@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::player::{Player, PlayerStatsComponent};
-use crate::physics::components::{Velocity, Grounded, Collider, Platform};
+use crate::physics::components::{Velocity, Grounded, Collider, Platform, RopeSwing};
 use super::components::{ProceduralLimbs, FootState};
 use super::ik_math::{solve_ik_2d, draw_connected_noodle};
 
@@ -9,7 +9,7 @@ fn find_ground_y(
     scale: f32,
     platforms: &Query<(&Transform, &Collider), With<Platform>>,
 ) -> f32 {
-    let mut ground_y = -1080.0;
+    let mut ground_y = -2160.0;
     let player_radius = 40.0 * scale;
     for (plat_trans, plat_coll) in platforms.iter() {
         if let Collider::Rect { size } = plat_coll {
@@ -204,5 +204,17 @@ pub fn process_foot(
                 FootState::Stepping { start, target, progress }
             }
         }
+    }
+}
+
+pub fn draw_rope_lines(
+    mut gizmos: Gizmos,
+    query: Query<(&Transform, &RopeSwing)>,
+) {
+    for (transform, rope) in query.iter() {
+        let start = rope.anchor;
+        let end = transform.translation.xy();
+        // Draw a thick gray line for the rope
+        gizmos.line_2d(start, end, Color::srgb(0.5, 0.4, 0.3));
     }
 }

@@ -8,7 +8,7 @@ use crate::player::{Player, Health};
 use crate::physics::weapon::Weapon;
 use super::types::*;
 
-pub fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
+pub fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool, controls_only: bool) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -86,58 +86,60 @@ pub fn spawn_settings_menu(commands: &mut Commands, is_main_menu: bool) {
                     },
                     SettingsInnerList { scroll_offset: 0.0 },
                 )).with_children(|list| {
-                    // Global Physics
-                    spawn_section_header(list, "GLOBAL PHYSICS");
-                    spawn_setting_row(list, "Gravity Scale", SettingType::Gravity);
-                    spawn_setting_row(list, "Player Acceleration", SettingType::PlayerAccel);
-                    spawn_setting_row(list, "Player Jump Force", SettingType::PlayerJumpForce);
-                    spawn_setting_row(list, "Boundary Restitution", SettingType::BoundaryRestitution);
-                    spawn_setting_row(list, "Player Restitution", SettingType::PlayerRestitution);
-                    spawn_setting_row(list, "Air Friction", SettingType::AirFriction);
-                    spawn_setting_row(list, "Ground Friction", SettingType::GroundFriction);
-                    spawn_setting_row(list, "Movement Stop Friction", SettingType::MovementStopFriction);
-                    spawn_setting_row(list, "Wall Slide Speed", SettingType::WallSlideSpeed);
-                    spawn_setting_row(list, "Wall Jump Push Force", SettingType::WallJumpPushForce);
-                    spawn_setting_row(list, "Fast Fall Acceleration", SettingType::FastFallAcceleration);
-                    spawn_setting_row(list, "Air Acceleration", SettingType::AirAccel);
-                    spawn_setting_row(list, "Player Base Radius", SettingType::PlayerBaseRadius);
-                    spawn_setting_row(list, "Player Base Mass", SettingType::PlayerBaseMass);
-                    spawn_setting_row(list, "Player Visual Offset", SettingType::PlayerVisualOffset);
-                    spawn_setting_row(list, "Player Aim Offset Y", SettingType::PlayerAimOffsetY);
-                    spawn_setting_row(list, "Boundary Knockback Speed", SettingType::BoundaryKnockbackSpeed);
-                    spawn_setting_row(list, "Boundary Damage Lockout (s)", SettingType::BoundaryDamageLockout);
-                    spawn_setting_row(list, "Boundary Deflect Lockout (s)", SettingType::BoundaryDeflectLockout);
-                    spawn_setting_row(list, "Spawn Grace Period (s)", SettingType::SpawnInvincibilityGracePeriod);
-                    spawn_setting_row(list, "Boundary Hazard Damage", SettingType::BoundaryHazardDamage);
-                    spawn_setting_row(list, "Fast Fall Stick Threshold", SettingType::FastFallStickThreshold);
-                    spawn_setting_row(list, "Fast Fall Velocity Limit", SettingType::FastFallVelocityLimit);
-                    spawn_setting_row(list, "Wall Cling Stick Threshold", SettingType::WallClingStickThreshold);
-                    spawn_setting_row(list, "Max Jump Allowance", SettingType::MaxJumpAllowance);
-                    spawn_setting_row(list, "Collision Skin Buffer", SettingType::CollisionPenetrationSkinBuffer);
-                    spawn_setting_row(list, "Overlapping Push Factor", SettingType::OverlappingPushFactor);
-                    spawn_setting_row(list, "Grounded Slope Threshold", SettingType::GroundedSlopeThreshold);
-                    spawn_setting_row(list, "Wall Contact Slope Threshold", SettingType::WallContactSlopeThreshold);
-                    spawn_setting_row(list, "Bullet Knockback Constant", SettingType::BulletKnockbackConstant);
+                    if !controls_only {
+                        // Global Physics
+                        spawn_section_header(list, "GLOBAL PHYSICS");
+                        spawn_setting_row(list, "Gravity Scale", SettingType::Gravity);
+                        spawn_setting_row(list, "Player Acceleration", SettingType::PlayerAccel);
+                        spawn_setting_row(list, "Player Jump Force", SettingType::PlayerJumpForce);
+                        spawn_setting_row(list, "Boundary Restitution", SettingType::BoundaryRestitution);
+                        spawn_setting_row(list, "Player Restitution", SettingType::PlayerRestitution);
+                        spawn_setting_row(list, "Air Friction", SettingType::AirFriction);
+                        spawn_setting_row(list, "Ground Friction", SettingType::GroundFriction);
+                        spawn_setting_row(list, "Movement Stop Friction", SettingType::MovementStopFriction);
+                        spawn_setting_row(list, "Wall Slide Speed", SettingType::WallSlideSpeed);
+                        spawn_setting_row(list, "Wall Jump Push Force", SettingType::WallJumpPushForce);
+                        spawn_setting_row(list, "Fast Fall Acceleration", SettingType::FastFallAcceleration);
+                        spawn_setting_row(list, "Air Acceleration", SettingType::AirAccel);
+                        spawn_setting_row(list, "Player Base Radius", SettingType::PlayerBaseRadius);
+                        spawn_setting_row(list, "Player Base Mass", SettingType::PlayerBaseMass);
+                        spawn_setting_row(list, "Player Visual Offset", SettingType::PlayerVisualOffset);
+                        spawn_setting_row(list, "Player Aim Offset Y", SettingType::PlayerAimOffsetY);
+                        spawn_setting_row(list, "Boundary Knockback Speed", SettingType::BoundaryKnockbackSpeed);
+                        spawn_setting_row(list, "Boundary Damage Lockout (s)", SettingType::BoundaryDamageLockout);
+                        spawn_setting_row(list, "Boundary Deflect Lockout (s)", SettingType::BoundaryDeflectLockout);
+                        spawn_setting_row(list, "Spawn Grace Period (s)", SettingType::SpawnInvincibilityGracePeriod);
+                        spawn_setting_row(list, "Boundary Hazard Damage", SettingType::BoundaryHazardDamage);
+                        spawn_setting_row(list, "Fast Fall Stick Threshold", SettingType::FastFallStickThreshold);
+                        spawn_setting_row(list, "Fast Fall Velocity Limit", SettingType::FastFallVelocityLimit);
+                        spawn_setting_row(list, "Wall Cling Stick Threshold", SettingType::WallClingStickThreshold);
+                        spawn_setting_row(list, "Max Jump Allowance", SettingType::MaxJumpAllowance);
+                        spawn_setting_row(list, "Collision Skin Buffer", SettingType::CollisionPenetrationSkinBuffer);
+                        spawn_setting_row(list, "Overlapping Push Factor", SettingType::OverlappingPushFactor);
+                        spawn_setting_row(list, "Grounded Slope Threshold", SettingType::GroundedSlopeThreshold);
+                        spawn_setting_row(list, "Wall Contact Slope Threshold", SettingType::WallContactSlopeThreshold);
+                        spawn_setting_row(list, "Bullet Knockback Constant", SettingType::BulletKnockbackConstant);
 
-                    for i in 1..=8 {
-                        spawn_section_header(list, &format!("PLAYER {} CHARACTER STATISTICS", i));
-                        spawn_setting_row(list, "Max Health", SettingType::PlayerHealth(i - 1));
-                        spawn_setting_row(list, "Movement Speed", SettingType::PlayerSpeed(i - 1));
-                        spawn_setting_row(list, "Player Scale Multiplier", SettingType::PlayerSize(i - 1));
-                        spawn_setting_row(list, "Bullet Damage", SettingType::PlayerDamage(i - 1));
-                        spawn_setting_row(list, "Bullet Range (seconds)", SettingType::PlayerBulletRange(i - 1));
-                        spawn_setting_row(list, "Bullet Velocity", SettingType::PlayerBulletSpeed(i - 1));
-                        spawn_setting_row(list, "Bullet Gravity Scale", SettingType::PlayerBulletGravity(i - 1));
-                        spawn_setting_row(list, "Bullet Size Multiplier", SettingType::PlayerBulletSizeMult(i - 1));
-                        spawn_setting_row(list, "Bullet Damage Growth (%)", SettingType::PlayerBulletGrowth(i - 1));
-                        spawn_setting_row(list, "Max Ammo Capacity", SettingType::PlayerMaxAmmo(i - 1));
-                        spawn_setting_row(list, "Weapon Reload Time", SettingType::PlayerReloadTime(i - 1));
-                        spawn_setting_row(list, "Rate of Fire Delay", SettingType::PlayerFireRate(i - 1));
-                        spawn_setting_row(list, "Max Bullet Bounces", SettingType::PlayerBounces(i - 1));
-                        spawn_setting_row(list, "Bounce Speed Multiplier", SettingType::PlayerBounceSpeedMultiplier(i - 1));
-                        spawn_setting_row(list, "Shield Block Duration", SettingType::PlayerBlockDuration(i - 1));
-                        spawn_setting_row(list, "Shield Block Cooldown", SettingType::PlayerBlockCooldown(i - 1));
-                        spawn_setting_row(list, "Border Block Force", SettingType::PlayerBlockBorderBoost(i - 1));
+                        for i in 1..=8 {
+                            spawn_section_header(list, &format!("PLAYER {} CHARACTER STATISTICS", i));
+                            spawn_setting_row(list, "Max Health", SettingType::PlayerHealth(i - 1));
+                            spawn_setting_row(list, "Movement Speed", SettingType::PlayerSpeed(i - 1));
+                            spawn_setting_row(list, "Player Scale Multiplier", SettingType::PlayerSize(i - 1));
+                            spawn_setting_row(list, "Bullet Damage", SettingType::PlayerDamage(i - 1));
+                            spawn_setting_row(list, "Bullet Range (seconds)", SettingType::PlayerBulletRange(i - 1));
+                            spawn_setting_row(list, "Bullet Velocity", SettingType::PlayerBulletSpeed(i - 1));
+                            spawn_setting_row(list, "Bullet Gravity Scale", SettingType::PlayerBulletGravity(i - 1));
+                            spawn_setting_row(list, "Bullet Size Multiplier", SettingType::PlayerBulletSizeMult(i - 1));
+                            spawn_setting_row(list, "Bullet Damage Growth (%)", SettingType::PlayerBulletGrowth(i - 1));
+                            spawn_setting_row(list, "Max Ammo Capacity", SettingType::PlayerMaxAmmo(i - 1));
+                            spawn_setting_row(list, "Weapon Reload Time", SettingType::PlayerReloadTime(i - 1));
+                            spawn_setting_row(list, "Rate of Fire Delay", SettingType::PlayerFireRate(i - 1));
+                            spawn_setting_row(list, "Max Bullet Bounces", SettingType::PlayerBounces(i - 1));
+                            spawn_setting_row(list, "Bounce Speed Multiplier", SettingType::PlayerBounceSpeedMultiplier(i - 1));
+                            spawn_setting_row(list, "Shield Block Duration", SettingType::PlayerBlockDuration(i - 1));
+                            spawn_setting_row(list, "Shield Block Cooldown", SettingType::PlayerBlockCooldown(i - 1));
+                            spawn_setting_row(list, "Border Block Force", SettingType::PlayerBlockBorderBoost(i - 1));
+                        }
                     }
 
                     // Keyboard Controls
@@ -579,7 +581,7 @@ pub fn settings_keyboard_scroll_system(
 pub fn get_setting_value(
     setting: SettingType,
     physics: &PhysicsSettings,
-    stats: &PersistentPlayerStats,
+    _stats: &PersistentPlayerStats,
     p_weapon: &PlayerWeaponSettings,
     kb: &KeyboardControls,
     ctrl: &ControllerControls,

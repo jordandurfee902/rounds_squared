@@ -19,6 +19,9 @@ pub struct LocalPlayerIndex(pub usize);
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IsNetworked(pub bool);
 
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostPeerId(pub matchbox_socket::PeerId);
+
 #[derive(Resource, Deref, DerefMut)]
 pub struct MatchboxSocketResource(pub WebRtcSocket);
 

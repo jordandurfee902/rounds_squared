@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::camera::Viewport;
 
-pub const TARGET_WIDTH: f32 = 3840.0;
-pub const TARGET_HEIGHT: f32 = 2160.0;
+pub const TARGET_WIDTH: f32 = 7680.0;
+pub const TARGET_HEIGHT: f32 = 4320.0;
 pub const ASPECT_RATIO: f32 = TARGET_WIDTH / TARGET_HEIGHT;
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -58,7 +58,8 @@ fn fit_viewport(
         return;
     };
 
-    if *state.get() == crate::settings::GameState::MainMenu || *state.get() == crate::settings::GameState::Lobby {
+    let s = *state.get();
+    if s != crate::settings::GameState::Gameplay && s != crate::settings::GameState::CardSelection {
         camera.viewport = None;
         return;
     }
@@ -98,7 +99,8 @@ fn draw_border(
     mut gizmos: Gizmos,
     state: Res<State<crate::settings::GameState>>,
 ) {
-    if *state.get() == crate::settings::GameState::MainMenu || *state.get() == crate::settings::GameState::Lobby {
+    let s = *state.get();
+    if s != crate::settings::GameState::Gameplay && s != crate::settings::GameState::CardSelection {
         return;
     }
     // Only draw red borders on the left and right sides

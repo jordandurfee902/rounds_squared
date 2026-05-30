@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use crate::player::Player;
 use crate::physics::particles::spawn_trail_particle;
 use super::components::*;
 

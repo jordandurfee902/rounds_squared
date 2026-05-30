@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Serialize, Deserialize};
 
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
 pub struct Grounded(pub bool);
@@ -55,3 +56,38 @@ pub struct ControllerInput {
 pub struct JumpAllowance {
     pub value: u32,
 }
+
+#[derive(Component, Debug, Clone)]
+pub struct MovingPlatform {
+    pub id: u32,
+    pub initial_pos: Vec2,
+    pub amplitude: Vec2,
+    pub frequency: Vec2,
+    pub spin_speed: f32,
+    pub current_rotation: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct RopeSwing {
+    pub anchor: Vec2,
+    pub length: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PhysicsObjectType {
+    SwingWeight,
+    StackableBox,
+    HollowSquare,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct PhysicsObject {
+    pub id: u32,
+    pub obj_type: PhysicsObjectType,
+    pub health: f32,
+    pub max_health: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StandingOn(pub Option<Entity>);
+

@@ -119,4 +119,78 @@ pub fn spawn_default_map(
         Vec3::new(1100.0, 700.0, 5.0),
         platform_color,
     );
+
+    // --- Overhaul Map Additions: Moving Platforms & Physics Objects ---
+
+    // 7. Horizontal Moving and Spinning Platform
+    let size = Vec2::new(300.0, 40.0) * 2.0;
+    let initial_pos = Vec2::new(0.0, 50.0) * 2.0;
+    commands.spawn((
+        crate::physics::components::Platform,
+        crate::physics::components::Collider::Rect { size },
+        Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
+        MeshMaterial2d(materials.add(Color::srgb(0.5, 0.2, 0.7))),
+        Transform::from_translation(initial_pos.extend(5.0)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        crate::physics::components::MovingPlatform {
+            id: 1,
+            initial_pos,
+            amplitude: Vec2::new(600.0, 0.0) * 2.0,
+            frequency: Vec2::new(1.0, 0.0),
+            spin_speed: 1.0,
+            current_rotation: 0.0,
+        },
+    ));
+
+    // 8. Rope Swing Weight (Pendulum)
+    let bob_radius = 40.0 * 2.0;
+    let anchor = Vec2::new(0.0, 1000.0) * 2.0;
+    let bob_pos = Vec2::new(200.0, 600.0) * 2.0;
+    commands.spawn((
+        crate::physics::components::Collider::Circle { radius: bob_radius },
+        Mesh2d(meshes.add(Circle::new(bob_radius))),
+        MeshMaterial2d(materials.add(Color::srgb(0.8, 0.3, 0.3))),
+        Transform::from_translation(bob_pos.extend(10.0)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        crate::physics::components::Velocity(Vec2::ZERO),
+        crate::physics::components::Mass(2.0),
+        crate::physics::components::PhysicsObject {
+            id: 100,
+            obj_type: crate::physics::components::PhysicsObjectType::SwingWeight,
+            health: 100.0,
+            max_health: 100.0,
+        },
+        crate::physics::components::RopeSwing {
+            anchor,
+            length: 400.0 * 2.0,
+        },
+    ));
+
+    // 9. Stackable Crates (3 boxes stacked on the Center Foundation platform)
+    let box_size = Vec2::new(60.0, 60.0) * 2.0;
+    for i in 0..3 {
+        let y_pos = -800.0 + 50.0 + (i as f32 + 0.5) * box_size.y + 10.0;
+        let box_pos = Vec2::new(0.0, y_pos);
+        commands.spawn((
+            crate::physics::components::Collider::Rect { size: box_size },
+            Mesh2d(meshes.add(Rectangle::new(box_size.x, box_size.y))),
+            MeshMaterial2d(materials.add(Color::srgb(0.7, 0.5, 0.3))),
+            Transform::from_translation(box_pos.extend(10.0)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            crate::physics::components::Velocity(Vec2::ZERO),
+            crate::physics::components::Mass(1.0),
+            crate::physics::components::PhysicsObject {
+                id: 200 + i,
+                obj_type: crate::physics::components::PhysicsObjectType::StackableBox,
+                health: 100.0,
+                max_health: 100.0,
+            },
+        ));
+    }
 }

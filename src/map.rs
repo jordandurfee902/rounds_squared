@@ -36,12 +36,14 @@ pub fn spawn_platform(
     pos: Vec3,
     color: Color,
 ) {
+    let scaled_size = size * 2.0;
+    let scaled_pos = Vec3::new(pos.x * 2.0, pos.y * 2.0, pos.z);
     commands.spawn((
         Platform,
-        Collider::Rect { size },
-        Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
+        Collider::Rect { size: scaled_size },
+        Mesh2d(meshes.add(Rectangle::new(scaled_size.x, scaled_size.y))),
         MeshMaterial2d(materials.add(color)),
-        Transform::from_translation(pos),
+        Transform::from_translation(scaled_pos),
         GlobalTransform::default(),
         Visibility::default(),
         InheritedVisibility::default(),
@@ -99,7 +101,7 @@ pub fn spawn_platforms(
 
 fn despawn_platforms(
     mut commands: Commands,
-    query: Query<Entity, With<Platform>>,
+    query: Query<Entity, Or<(With<Platform>, With<crate::physics::components::MovingPlatform>, With<crate::physics::components::PhysicsObject>, With<crate::physics::components::RopeSwing>)>>,
 ) {
     for entity in query.iter() {
         commands.entity(entity).despawn();

@@ -65,7 +65,7 @@ pub fn setup_main_menu(
 
     // Check if settings were opened in main menu
     if menu.is_settings_open && existing_settings.is_empty() {
-        super::settings_menu::spawn_settings_menu(&mut commands, true);
+        super::settings_menu::spawn_settings_menu(&mut commands, true, false);
     }
 }
 
@@ -79,5 +79,20 @@ pub fn cleanup_main_menu(
     }
     for entity in existing_settings.iter() {
         commands.entity(entity).despawn();
+    }
+}
+
+pub fn main_menu_ui_watcher(
+    mut commands: Commands,
+    menu: Res<ActiveMenu>,
+    existing_settings: Query<Entity, With<SettingsMenuContainer>>,
+) {
+    let has_settings = !existing_settings.is_empty();
+    if menu.is_settings_open && !has_settings {
+        super::settings_menu::spawn_settings_menu(&mut commands, true, false);
+    } else if !menu.is_settings_open && has_settings {
+        for ent in existing_settings.iter() {
+            commands.entity(ent).despawn();
+        }
     }
 }

@@ -77,7 +77,6 @@ pub fn spawn_card_list_ui(
             if !cards.is_empty() {
                 let player = Player::from_index(i);
                 let p_color = player.color();
-                let label = format!("P{}:", i + 1);
 
                 parent.spawn(Node {
                     flex_direction: FlexDirection::Row,
@@ -85,16 +84,6 @@ pub fn spawn_card_list_ui(
                     align_items: AlignItems::Center,
                     ..default()
                 }).with_children(|row_parent| {
-                    row_parent.spawn((
-                        Text::new(label),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(p_color),
-                        Pickable::IGNORE,
-                    ));
-
                     for &card_idx in cards {
                         spawn_card_widget(row_parent, player, card_idx, p_color, bg_widget);
                     }

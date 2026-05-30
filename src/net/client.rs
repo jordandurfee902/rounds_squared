@@ -7,14 +7,22 @@ use crate::physics::anim::PlayerAim;
 use crate::maps::ActiveMap;
 use super::{MatchboxSocketResource, LocalInput, ClientInputPacket, HostStatePacket, matchmaking::parse_game_state, matchmaking::parse_active_map};
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ClientNetworkResources<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub socket_res: Option<ResMut<'w, MatchboxSocketResource>>,
+    pub next_state: ResMut<'w, NextState<GameState>>,
+    pub lobby_slots: ResMut<'w, LobbySlots>,
+    pub score_tracker: ResMut<'w, ScoreTracker>,
+    pub active_map: ResMut<'w, ActiveMap>,
+    pub state: Res<'w, State<GameState>>,
+    pub persistent_stats: ResMut<'w, PersistentPlayerStats>,
+    pub card_state: Option<ResMut<'w, crate::physics::card_selection::CardSelectionState>>,
+    pub time: Res<'w, Time>,
+}
+
 pub fn client_network_system(
-    mut commands: Commands,
-    socket_res: Option<ResMut<MatchboxSocketResource>>,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut lobby_slots: ResMut<LobbySlots>,
-    mut score_tracker: ResMut<ScoreTracker>,
-    mut active_map: ResMut<ActiveMap>,
-    state: Res<State<GameState>>,
+    resources: ClientNetworkResources,
     mut players: Query<(
         &Player,
         &mut Transform,
@@ -31,23 +39,40 @@ pub fn client_network_system(
     ), Without<Projectile>>,
     client_projectiles: Query<Entity, With<Projectile>>,
     client_gravity_wells: Query<Entity, With<crate::physics::card_selection::cards::gravity_vortex::GravityWell>>,
-    mut persistent_stats: ResMut<PersistentPlayerStats>,
-    card_state: Option<ResMut<crate::physics::card_selection::CardSelectionState>>,
     local_input: LocalInput,
-    time: Res<Time>,
     mut gamepad_cooldown: Local<f32>,
     local_player_idx: Option<Res<crate::net::LocalPlayerIndex>>,
+    host_peer_res: Option<Res<crate::net::HostPeerId>>,
+    mut moving_platforms: Query<(&mut Transform, &mut crate::physics::components::MovingPlatform), (Without<Player>, Without<Projectile>)>,
+    mut physics_objects: Query<(Entity, &mut Transform, &mut Velocity, &mut crate::physics::components::PhysicsObject), (Without<Player>, Without<Projectile>, Without<crate::physics::components::MovingPlatform>)>,
 ) {
+    let ClientNetworkResources {
+        mut commands,
+        socket_res,
+        mut next_state,
+        mut lobby_slots,
+        mut score_tracker,
+        mut active_map,
+        state,
+        mut persistent_stats,
+        card_state,
+        time,
+    } = resources;
+
     let Some(mut socket) = socket_res else {
         return;
     };
     socket.update_peers();
 
-    let peer_ids: Vec<_> = socket.connected_peers().collect();
-    if peer_ids.is_empty() {
-        return;
-    }
-    let host_peer = peer_ids[0];
+    let host_peer = if let Some(h) = host_peer_res.as_ref() {
+        h.0
+    } else {
+        let peer_ids: Vec<_> = socket.connected_peers().collect();
+        if peer_ids.is_empty() {
+            return;
+        }
+        peer_ids[0]
+    };
 
     let local_idx = local_player_idx.map(|idx| idx.0).unwrap_or(0);
 
@@ -273,10 +298,34 @@ pub fn client_network_system(
             weapon.reload_timer = p_state.reload_timer;
             grounded.0 = p_state.grounded;
         }
+     }
+
+    // Sync moving platforms
+    for (mut plat_trans, mut mp) in moving_platforms.iter_mut() {
+        if let Some(net_plat) = pkt.moving_platforms.iter().find(|p| p.id == mp.id) {
+            plat_trans.translation = net_plat.pos.extend(plat_trans.translation.z);
+            plat_trans.rotation = Quat::from_rotation_z(net_plat.rotation);
+            mp.current_rotation = net_plat.rotation;
+        }
     }
 
-    // Overwrite Lobby slots
+    // Sync physics objects and handle dynamic despawning of destroyed items
+    for (entity, mut obj_trans, mut obj_vel, mut obj) in physics_objects.iter_mut() {
+        if let Some(net_obj) = pkt.physics_objects.iter().find(|o| o.id == obj.id) {
+            obj_trans.translation = net_obj.pos.extend(obj_trans.translation.z);
+            obj_trans.rotation = Quat::from_rotation_z(net_obj.rotation);
+            obj_vel.0 = net_obj.vel;
+            obj.health = net_obj.health;
+        } else {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // Overwrite Lobby slots (client is authoritative on their own slot to prevent flickering loops)
     for i in 0..8 {
+        if i == local_idx {
+            continue;
+        }
         if pkt.active_players[i] {
             if lobby_slots.slots[i].is_none() {
                 lobby_slots.slots[i] = Some(if pkt.is_gamepad[i] { InputDevice::Gamepad(Entity::PLACEHOLDER) } else { InputDevice::KeyboardMouse });
