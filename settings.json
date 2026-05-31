@@ -34,7 +34,7 @@
   "p1_character": {
     "health": 100.0,
     "speed": 800.0,
-    "size": 10.0,
+    "size": 1.75,
     "damage": 25.0,
     "bullet_range": 25.0,
     "bullet_speed": 1250.0,
@@ -53,8 +53,8 @@
   },
   "p2_character": {
     "health": 100.0,
-    "speed": 600.0,
-    "size": 1.25,
+    "speed": 800.0,
+    "size": 1.75,
     "damage": 25.0,
     "bullet_range": 25.0,
     "bullet_speed": 1250.0,

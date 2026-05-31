@@ -115,11 +115,34 @@ pub fn spawn_players(
             },
         )).with_children(|parent| {
             parent.spawn((
-                Mesh2d(meshes.add(Circle::new(physics_settings.player_base_radius * scale))),
+                PlayerBody,
+                Mesh2d(meshes.add(Circle::new(physics_settings.player_base_radius))),
                 MeshMaterial2d(materials.add(p_color)),
-                Transform::from_xyz(0.0, physics_settings.player_visual_offset * scale, 0.0),
+                Transform {
+                    translation: Vec3::new(0.0, physics_settings.player_visual_offset * scale, 0.0),
+                    scale: Vec3::splat(scale),
+                    ..default()
+                },
             ));
         });
+    }
+}
+
+/// Updates the body child entity's transform scale when player_scale changes.
+pub fn update_player_body_scale(
+    players: Query<(&PlayerStatsComponent, &Children), Changed<PlayerStatsComponent>>,
+    mut bodies: Query<(&mut Transform, &PlayerBody)>,
+    physics_settings: Res<PhysicsSettings>,
+) {
+    for (stats, children) in players.iter() {
+        let scale = stats.player_scale;
+        for child in children {
+            if let Ok((mut transform, _)) = bodies.get_mut(*child) {
+                transform.translation.y = physics_settings.player_visual_offset * scale;
+                transform.scale = Vec3::splat(scale);
+                break;
+            }
+        }
     }
 }
 

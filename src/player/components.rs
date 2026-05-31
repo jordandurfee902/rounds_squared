@@ -72,6 +72,9 @@ pub struct PlayerStatsComponent {
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PlayerBody;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct BlockComponent {
     pub active_timer: f32,
     pub cooldown_timer: f32,

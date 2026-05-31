@@ -75,6 +75,7 @@ impl Plugin for PhysicsPlugin {
         // Noodle drawing and visual systems (continue running while paused to draw visual frames)
         app.add_systems(Update, (
             update_aim,
+            crate::player::update_player_body_scale,
             update_and_draw_legs,
             draw_procedural_arms,
             draw_expressive_faces,
