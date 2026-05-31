@@ -2,7 +2,7 @@
   "physics": {
     "gravity": -2800.0,
     "player_accel": 10.0,
-    "player_jump_force": 2000.0,
+    "player_jump_force": 1400.0,
     "boundary_restitution": 0.0,
     "player_restitution": 0.5,
     "air_friction": 1.0,
@@ -33,8 +33,8 @@
   },
   "p1_character": {
     "health": 100.0,
-    "speed": 1200.0,
-    "size": 1.25,
+    "speed": 800.0,
+    "size": 10.0,
     "damage": 25.0,
     "bullet_range": 25.0,
     "bullet_speed": 1250.0,

@@ -11,17 +11,14 @@ pub enum FootState {
     Stepping {
         start: Vec2,
         target: Vec2,
-        progress: f32, // 0.0 to 1.0 lerp progress
+        progress: f32,
     },
-    Airborne { current: Vec2 },
+    Airborne,
 }
 
 impl FootState {
     pub fn is_zero(&self) -> bool {
-        match self {
-            FootState::Airborne { current } => current.length_squared() < 0.0001,
-            _ => false,
-        }
+        matches!(self, FootState::Airborne)
     }
 }
 
@@ -35,8 +32,8 @@ pub struct ProceduralLimbs {
 impl Default for ProceduralLimbs {
     fn default() -> Self {
         Self {
-            left_foot: FootState::Airborne { current: Vec2::ZERO },
-            right_foot: FootState::Airborne { current: Vec2::ZERO },
+            left_foot: FootState::Airborne,
+            right_foot: FootState::Airborne,
             step_cooldown: 0.0,
         }
     }
