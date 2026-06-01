@@ -15,7 +15,7 @@ pub fn spawn_players(
     lobby_slots: Res<LobbySlots>,
 ) {
     let base_x = match *active_map {
-        crate::maps::ActiveMap::DefaultMap => 1350.0,
+        crate::maps::ActiveMap::DefaultMap => 700.0,
         crate::maps::ActiveMap::PillarsMap => 650.0,
         crate::maps::ActiveMap::StadiumMap => 350.0,
         crate::maps::ActiveMap::ChasmBridge => 1300.0,
@@ -30,7 +30,7 @@ pub fn spawn_players(
         crate::maps::ActiveMap::AncientColiseum => 800.0,
     };
     let base_y = match *active_map {
-        crate::maps::ActiveMap::DefaultMap => 100.0,
+        crate::maps::ActiveMap::DefaultMap => -100.0,
         crate::maps::ActiveMap::PillarsMap => 150.0,
         crate::maps::ActiveMap::StadiumMap => -100.0,
         crate::maps::ActiveMap::ChasmBridge => 300.0,
